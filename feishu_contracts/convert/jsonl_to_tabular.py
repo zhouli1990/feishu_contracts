@@ -2,12 +2,15 @@ from __future__ import annotations
 import csv
 import json
 import os
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import pandas as pd  # type: ignore
 except Exception:  # pragma: no cover
     pd = None  # type: ignore
+
+logger = logging.getLogger("convert")
 
 
 def _to_json_cell_value(v: Any) -> Any:
@@ -214,6 +217,14 @@ def _write_list_csv(path: str, rows: List[Dict[str, Any]]) -> None:
 
 def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = None) -> Dict[str, Any]:
     records = _read_jsonl(jsonl_path)
+    try:
+        logger.info(
+            "start jsonl→csv/xlsx jsonl=%s csv=%s xlsx=%s records=%d",
+            jsonl_path, csv_path, excel_path, len(records),
+            extra={"is_progress": True},
+        )
+    except Exception:
+        pass
     if not records:
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -228,10 +239,22 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
             result["list_csvs"] = {}
             _write_list_csv(f"{base}_details.csv", [])
             result["list_csvs"]["details"] = f"{base}_details.csv"
+        try:
+            logger.info("done empty jsonl csv=%s xlsx=%s", result.get("csv"), result.get("excel"), extra={"is_progress": True})
+        except Exception:
+            pass
         return result
 
     base_keys, list_keys = _split_keys(records)
+    try:
+        logger.debug("split keys base=%d list=%d", len(base_keys), len(list_keys))
+    except Exception:
+        pass
     _write_main_csv(records, base_keys, csv_path)
+    try:
+        logger.info("write main csv rows=%d path=%s", len(records), csv_path)
+    except Exception:
+        pass
     list_tables = _build_list_tables(records, list_keys)
 
     special_rel_key = "relation_contracts_contracts"
@@ -250,6 +273,10 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
                 ).applymap(_to_json_cell_value).to_excel(
                     writer, index=False, sheet_name="details"
                 )
+                try:
+                    logger.info("write sheet name=%s rows=%d", "details", len(records))
+                except Exception:
+                    pass
                 used: Dict[str, int] = {}
                 for key in list_keys:
                     rows = list_tables.get(key, [])
@@ -259,6 +286,10 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
                     else:
                         df = pd.DataFrame(columns=["contract_number"])
                     df.to_excel(writer, index=False, sheet_name=sheet_name)
+                    try:
+                        logger.info("write sheet name=%s rows=%d", sheet_name, len(rows))
+                    except Exception:
+                        pass
             result["excel"] = excel_path
         else:
             base = os.path.splitext(excel_path)[0]
@@ -267,4 +298,12 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
                 path = f"{base}_{key}.csv"
                 _write_list_csv(path, rows)
                 result["list_csvs"][key] = path
+                try:
+                    logger.info("write list csv name=%s rows=%d path=%s", key, len(rows), path)
+                except Exception:
+                    pass
+    try:
+        logger.info("done csv=%s xlsx=%s list_sheets=%d", result.get("csv"), result.get("excel"), len(result.get("list_csvs") or list_keys), extra={"is_progress": True})
+    except Exception:
+        pass
     return result

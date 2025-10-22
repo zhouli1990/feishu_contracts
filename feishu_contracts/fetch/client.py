@@ -4,6 +4,7 @@ import json
 import time
 import random
 import threading
+import logging
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,6 +17,9 @@ except Exception:  # pragma: no cover
     pd = None  # type: ignore
 
 from feishu_contracts.convert.jsonl_to_tabular import convert_jsonl
+from feishu_contracts.common.logging_config import get_progress_interval
+
+logger = logging.getLogger("fetch")
 
 
 @dataclass
@@ -124,6 +128,10 @@ class FeishuContractClient:
             page_attempts = 0
             while True:
                 try:
+                    try:
+                        logger.debug("search page start token=%s", _fmt_token(page_token))
+                    except Exception:
+                        pass
                     if self.rate_limiter is not None:
                         self.rate_limiter.acquire()
                     resp = requests.post(url, headers=self.headers, json=body, timeout=60)
@@ -143,6 +151,13 @@ class FeishuContractClient:
                         page_attempts += 1
                         base = min(2 ** page_attempts, 8.0)
                         wait = max(0.5, base + base * random.uniform(-0.2, 0.2))
+                        try:
+                            logger.warning(
+                                "rate_limited during search code=%s status=%s wait=%.1fs attempt=%s",
+                                str(code_val), str(rstatus), wait, page_attempts,
+                            )
+                        except Exception:
+                            pass
                         if self.rate_limiter is not None:
                             self.rate_limiter.set_cooldown(wait)
                         time.sleep(wait)
@@ -157,6 +172,13 @@ class FeishuContractClient:
 
             has_more = bool(data.get("has_more", False) or data.get("hasMore", False))
             next_token_raw = data.get("page_token") or data.get("pageToken") or ""
+            try:
+                logger.debug(
+                    "search page done items=%d has_more=%s next_token=%s",
+                    len(page_items), str(has_more), _fmt_token(next_token_raw),
+                )
+            except Exception:
+                pass
 
             items.extend(page_items)
             if max_items is not None and max_items > 0 and len(items) >= max_items:
@@ -202,6 +224,14 @@ class FeishuContractClient:
                         attempts += 1
                         base = min(2 ** attempts, 8.0)
                         wait = max(0.5, base + base * random.uniform(-0.2, 0.2))
+                        try:
+                            logger.warning(
+                                "rate_limited during search_by_number code=%s status=%s wait=%.1fs attempt=%s",
+                                str(code_val), str(rstatus), wait, attempts,
+                                extra={"contract_code": str(contract_number), "attempt": attempts},
+                            )
+                        except Exception:
+                            pass
                         if self.rate_limiter is not None:
                             self.rate_limiter.set_cooldown(wait)
                         time.sleep(wait)
@@ -254,9 +284,22 @@ class FeishuContractClient:
             last_err: Optional[Exception] = None
             for i in range(5):
                 try:
-                    return self.get_contract_detail(cid)
+                    try:
+                        logger.debug("detail start try=%d", i + 1, extra={"contract_id": cid})
+                    except Exception:
+                        pass
+                    res = self.get_contract_detail(cid)
+                    try:
+                        logger.debug("detail done", extra={"contract_id": cid})
+                    except Exception:
+                        pass
+                    return res
                 except Exception as e:
                     last_err = e
+                    try:
+                        logger.error("detail error %s", str(e), extra={"contract_id": cid})
+                    except Exception:
+                        pass
                     time.sleep(min(1 * (i + 1), 5))
             return {"contract_id": cid, "_error": str(last_err) if last_err else "unknown error"}
 
@@ -327,7 +370,19 @@ def _process_codes_once(
     status_rows: List[Dict[str, Any]] = []
     failed_codes: set = set()
     count_written = 0
+    success_count = 0
+    fail_count = 0
+    start_t = time.time()
+    progress_interval = max(1, int(get_progress_interval(100)))
     for idx, code in enumerate(codes):
+        try:
+            logger.debug(
+                "search_by_number start page_size=%d",
+                page_size,
+                extra={"contract_code": str(code)},
+            )
+        except Exception:
+            pass
         try:
             items = client.search_contracts_by_number(contract_number=str(code), page_size=page_size)
         except Exception as e:
@@ -339,7 +394,27 @@ def _process_codes_once(
                 "attempt": attempt,
             })
             failed_codes.add(code)
+            fail_count += 1
+            processed = idx + 1
+            if processed % progress_interval == 0 or processed == len(codes):
+                elapsed = max(time.time() - start_t, 1e-6)
+                rps = processed / elapsed
+                remaining = max(len(codes) - processed, 0)
+                eta_s = (remaining / rps) if rps > 0 else 0.0
+                logger.info(
+                    "progress %d/%d ok=%d fail=%d rps=%.1f eta=%.0fs",
+                    processed, len(codes), success_count, fail_count, rps, eta_s,
+                    extra={"is_progress": True, "contract_code": str(code)},
+                )
             continue
+        try:
+            logger.debug(
+                "search_by_number done items=%d",
+                len(items),
+                extra={"contract_code": str(code)},
+            )
+        except Exception:
+            pass
         if not items:
             status_rows.append({
                 "contract_code": code,
@@ -349,6 +424,18 @@ def _process_codes_once(
                 "attempt": attempt,
             })
             failed_codes.add(code)
+            fail_count += 1
+            processed = idx + 1
+            if processed % progress_interval == 0 or processed == len(codes):
+                elapsed = max(time.time() - start_t, 1e-6)
+                rps = processed / elapsed
+                remaining = max(len(codes) - processed, 0)
+                eta_s = (remaining / rps) if rps > 0 else 0.0
+                logger.info(
+                    "progress %d/%d ok=%d fail=%d rps=%.1f eta=%.0fs",
+                    processed, len(codes), success_count, fail_count, rps, eta_s,
+                    extra={"is_progress": True, "contract_code": str(code)},
+                )
             continue
         code_any_success = False
         for it in items:
@@ -392,6 +479,22 @@ def _process_codes_once(
                 })
         if not code_any_success:
             failed_codes.add(code)
+            fail_count += 1
+        else:
+            success_count += 1
+
+        processed = idx + 1
+        if processed % progress_interval == 0 or processed == len(codes):
+            elapsed = max(time.time() - start_t, 1e-6)
+            rps = processed / elapsed
+            remaining = max(len(codes) - processed, 0)
+            eta_s = (remaining / rps) if rps > 0 else 0.0
+            logger.info(
+                "progress %d/%d ok=%d fail=%d rps=%.1f eta=%.0fs",
+                processed, len(codes), success_count, fail_count, rps, eta_s,
+                extra={"is_progress": True, "contract_code": str(code)},
+            )
+
         if limit_contracts > 0 and count_written >= limit_contracts:
             break
     return status_rows, sorted(failed_codes)
@@ -444,6 +547,15 @@ def run_fetch(cfg: FetchConfig) -> Dict[str, Any]:
             attempt,
             limit_contracts=max(0, int(cfg.limit_contracts or 0)),
         )
+        try:
+            ok_cnt = sum(1 for r in status_rows if str(r.get("status")) == "success")
+            fail_cnt = sum(1 for r in status_rows if str(r.get("status")) != "success")
+            logger.info(
+                "round_summary pass=%d ok=%d fail=%d remain=%d",
+                attempt, ok_cnt, fail_cnt, len(failed_codes),
+            )
+        except Exception:
+            pass
         _write_status_csv(cfg.status_csv, status_rows, append=(attempt > 1))
         if not failed_codes:
             break
@@ -452,7 +564,22 @@ def run_fetch(cfg: FetchConfig) -> Dict[str, Any]:
         current_codes = failed_codes
 
     # convert jsonl → csv/excel
+    convert_logger = logging.getLogger("convert")
+    try:
+        convert_logger.info(
+            "start convert jsonl→csv/xlsx jsonl=%s csv=%s xlsx=%s",
+            cfg.output_jsonl, cfg.final_csv, cfg.output_xlsx,
+        )
+    except Exception:
+        pass
     convert_result = convert_jsonl(cfg.output_jsonl, cfg.final_csv, cfg.output_xlsx)
+    try:
+        convert_logger.info(
+            "convert done csv=%s xlsx=%s",
+            convert_result.get("csv"), convert_result.get("excel"),
+        )
+    except Exception:
+        pass
     return {
         "jsonl": cfg.output_jsonl,
         "status_csv": cfg.status_csv,

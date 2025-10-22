@@ -3,11 +3,15 @@ import argparse
 import json
 import math
 import os
+import time
+import logging
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import yaml
 from openpyxl import load_workbook
+
+logger = logging.getLogger("transform")
 
 
 def _to_str(x: Any) -> str:
@@ -255,7 +259,7 @@ def get_values_from_source(df_map: Dict[str, pd.DataFrame], base_row: Dict[str, 
     return []
 
 
-def process_one_to_one(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame], wb, join_key: str):
+def process_one_to_one(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame], wb, join_key: str) -> int:
     """通用的一对一目标表写入：以 details 为基表（如存在），否则以 ts_spec.source 为基表，
     按 join_key 维度聚合同一合同号下其他表的 where 命中行，并执行 transform 链得到单值输出。
     """
@@ -290,17 +294,19 @@ def process_one_to_one(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame],
             if k in hdr:
                 ws.cell(row=i, column=hdr[k], value=v)
         start_row += 1
+    return len(out_rows)
 
 
-def process_simple_append(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame], wb):
+def process_simple_append(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame], wb) -> int:
     ws = wb[ts_spec["name"]]
     hdr = header_index(ws)
     src_name = ts_spec.get("source")
     if not src_name or src_name not in df_map:
         # 源 Sheet 缺失：跳过该目标写入（常见于可选子表：payments 等）
-        return
+        return 0
     src = df_map[src_name]
     start_row = ws.max_row + 1 if ws.max_row >= 1 else 2
+    count = 0
     for _, r in src.iterrows():
         base = r.to_dict(); base["__base_sheet__"] = ts_spec.get("source")
         row_out: Dict[str, Any] = {}
@@ -322,6 +328,8 @@ def process_simple_append(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFram
             if k in hdr:
                 ws.cell(row=start_row, column=hdr[k], value=v)
         start_row += 1
+        count += 1
+    return count
 
 
 def run(source: str, template: str, mapping_path: str, out_path: str):
@@ -332,17 +340,22 @@ def run(source: str, template: str, mapping_path: str, out_path: str):
     wb = load_workbook(template)
 
     # 逐目标表处理：one_to_one 使用通用聚合；one_to_many 逐行追加
+    logger.info("start transform source=%s template=%s mapping=%s out=%s", source, template, mapping_path, out_path, extra={"is_progress": True})
     for ts in mapping["target_sheets"]:
         name = ts["name"]
         if name not in wb.sheetnames:
             continue
         policy = ts.get("row_policy", "one_to_one")
+        t0 = time.time()
         if policy == "one_to_one":
-            process_one_to_one(ts, df_map, wb, join_key)
+            rows = process_one_to_one(ts, df_map, wb, join_key)
         else:
-            process_simple_append(ts, df_map, wb)
+            rows = process_simple_append(ts, df_map, wb)
+        elapsed = time.time() - t0
+        logger.info("sheet=%s policy=%s rows=%d elapsed=%.1fs", name, policy, int(rows), elapsed, extra={"is_progress": True})
 
     wb.save(out_path)
+    logger.info("done out=%s", out_path, extra={"is_progress": True})
 
 
 def main():

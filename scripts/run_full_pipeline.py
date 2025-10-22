@@ -9,7 +9,7 @@ if PROJ_ROOT not in sys.path:
     sys.path.insert(0, PROJ_ROOT)
 
 from feishu_contracts.transform.transformer import run as transform_run
-from feishu_contracts.common.logging import setup_logger
+from feishu_contracts.common.logging_config import init_logging
 from feishu_contracts.common.config import load_settings, ensure_parent_dir
 from feishu_contracts.fetch.client import run_fetch, FetchConfig as FetchCfg
 
@@ -20,8 +20,9 @@ def main() -> None:
     parser.add_argument("--config", default=default_config, help="Path to settings.yaml")
     args = parser.parse_args()
 
-    setup_logger(os.path.join(PROJ_ROOT, "logs", "run_full_pipeline.log"))
     cfg = load_settings(args.config)
+    init_logging((cfg.get("logging") if isinstance(cfg, dict) else {}) or {}, PROJ_ROOT)
+    logger = logging.getLogger("pipeline")
 
     paths = cfg.get("paths", {})
     conv = cfg.get("convert", {})
@@ -48,7 +49,7 @@ def main() -> None:
     for p in [jsonl_input, csv_output, excel_output, status_csv]:
         ensure_parent_dir(p)
 
-    logging.info("[1/3] 开始抓取合同数据 …")
+    logger.info("[1/3] 开始抓取合同数据 …")
     fetch_cfg = FetchCfg(
         app_key=app_key,
         app_secret=app_secret,
@@ -64,7 +65,7 @@ def main() -> None:
         output_xlsx=excel_output,
     )
     _fetch_result = run_fetch(fetch_cfg)
-    logging.info("[1/3] 抓取完成")
+    logger.info("[1/3] 抓取完成")
 
     # choose transform inputs
     source_excel = paths.get("source") or excel_output
@@ -79,9 +80,9 @@ def main() -> None:
         out_path = os.path.join(PROJ_ROOT, out_path)
     ensure_parent_dir(out_path)
 
-    logging.info("[2/3] 开始模板填充 …")
+    logger.info("[2/3] 开始模板填充 …")
     transform_run(source_excel, template, mapping, out_path)
-    logging.info("[2/3] 模板填充完成")
+    logger.info("[2/3] 模板填充完成")
 
     print("完成：")
     print(f"  JSONL: {jsonl_input}")

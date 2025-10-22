@@ -284,11 +284,13 @@ target_sheets:
       - to: { column: 是否我方先盖章 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "是否我方先盖章" }
-        transform: [trim]
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
       - to: { column: 签约方式 }
         default: "纸质签约"
 
-  - name: 签约信息拟制表单
+  - name: 签约方全量字段
     row_key: contract_number
     row_policy: one_to_one
     source: form
