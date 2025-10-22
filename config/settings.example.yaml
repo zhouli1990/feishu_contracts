@@ -1,0 +1,25 @@
+paths:
+  source: data/processed/contracts.xlsx
+  template: templates/合同导入模板.xlsx
+  mapping: feishu_contracts/transform/mapping.yaml
+  output_dir: output/
+
+convert:
+  jsonl_input: data/raw/contracts.jsonl
+  csv_output: data/processed/contracts.csv
+  excel_output: data/processed/contracts.xlsx
+
+feishu:
+  app_key: "YOUR_APP_KEY"
+  app_secret: "YOUR_APP_SECRET"
+
+fetch:
+  page_size: 50
+  permission: 0        # 0=全部，1=我的可见，2=我申请的
+  detail_workers: 1
+  limit_contracts: 0
+  contract_codes_file: data/raw/合同编码清单.txt
+
+options:
+  excel_engine: openpyxl
+  encoding: utf-8

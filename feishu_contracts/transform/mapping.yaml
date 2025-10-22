@@ -1,0 +1,346 @@
+version: 1
+join:
+  keys:
+    contract_number:
+      details: contract_number
+      form: contract_number
+      payments: contract_number
+      contract_budget_list: contract_number
+      our_party_list: contract_number
+      counter_party_list: contract_number
+
+# 目标模板各 Sheet 的映射
+# 注意：如需切换“需求人”提取 user_id，只需将 form_pick.field 改为 user_id
+
+target_sheets:
+  - name: 历史合同导入
+    row_key: contract_number
+    row_policy: one_to_one
+    source: details
+    mappings:
+      - to: { column: 合同编码 }
+        from: [{ sheet: details, column: contract_number }]
+        transform: [trim]
+        required: true
+      - to: { column: 合同状态 }
+        from: [{ sheet: details, column: contract_status_name }]
+        transform: [trim]
+      - to: { column: 合同名称（支持要素提取） }
+        from: [{ sheet: details, column: contract_name }]
+        transform: [trim]
+        required: true
+      - to: { column: 收支类型 }
+        from: [{ sheet: details, column: pay_type_name }]
+        transform: [trim]
+      - to: { column: 合同分类 }
+        from: [{ sheet: details, column: contract_category_name }]
+        transform: [trim]
+      - to: { column: 合同说明 }
+        from: [{ sheet: details, column: remark }]
+        transform: [trim]
+      - to: { column: 计价方式 }
+        from: [{ sheet: details, column: property_type_name }]
+        transform: [trim]
+      - to: { column: 合同总额 }
+        from: [{ sheet: details, column: amount }]
+        transform:
+          - number_parse: { thousands: ",", decimal: "." }
+          - round: 4
+      - to: { column: 预估金额 }
+        from: [{ sheet: details, column: estimated_amount }]
+        transform:
+          - number_parse: { thousands: ",", decimal: "." }
+          - round: 4
+      - to: { column: 币种 }
+        from: [{ sheet: details, column: currency_name }]
+        transform: [trim]
+      - to: { column: 合同期限类型（支持要素提取） }
+        from: [{ sheet: details, column: fixed_validity_name }]
+        transform: [trim]
+      - to: { column: 合同期限说明（支持要素提取） }
+        from: [{ sheet: details, column: validity_date_desc }]
+        transform: [trim]
+      - to: { column: 有效日期从（支持要素提取） }
+        from: [{ sheet: details, column: start_date }]
+        transform:
+          - date_parse: { input_formats: ["yyyy-MM-dd", "yyyy/M/d", "yyyy/M/dd"], tz: "Asia/Shanghai" }
+          - date_format: "yyyy-MM-dd"
+      - to: { column: 有效日期至（支持要素提取） }
+        from: [{ sheet: details, column: end_date }]
+        transform:
+          - date_parse: { input_formats: ["yyyy-MM-dd", "yyyy/M/d", "yyyy/M/dd"], tz: "Asia/Shanghai" }
+          - date_format: "yyyy-MM-dd"
+      - to: { column: 合同申请时间 }
+        from: [{ sheet: details, column: create_time }]
+        transform:
+          - date_parse: { input_formats: ["yyyy-MM-dd HH:mm:ss", "yyyy/M/d H:mm", "yyyy-MM-dd"], tz: "Asia/Shanghai" }
+          - date_format: "yyyy-MM-dd HH:mm:ss"
+      - to: { column: 合同签订时间 }
+        from: [{ sheet: details, column: signed_time }]
+        transform:
+          - date_parse: { input_formats: ["yyyy-MM-dd HH:mm:ss", "yyyy/M/d H:mm", "yyyy-MM-dd"], tz: "Asia/Shanghai" }
+          - date_format: "yyyy-MM-dd HH:mm:ss"
+      - to: { column: 合同归档时间 }
+        from: [{ sheet: details, column: archived_time }]
+        transform:
+          - date_parse: { input_formats: ["yyyy-MM-dd HH:mm:ss", "yyyy/M/d H:mm", "yyyy-MM-dd"], tz: "Asia/Shanghai" }
+          - date_format: "yyyy-MM-dd HH:mm:ss"
+
+      # form 长表字段：按 attribute_name 过滤，取 attribute_value
+      - to: { column: 需求人 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "需求人" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name, unique: true }
+          - join_agg: { func: concat, sep: ", " }
+      - to: { column: 需求人部门 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "需求人部门" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name, unique: true }
+          - join_agg: { func: concat, sep: ", " }
+      - to: { column: 履约保证金（支持要素提取） }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "履约保证金" }
+        transform:
+          - number_parse: { thousands: ",", decimal: "." }
+          - round: 2
+      - to: { column: 质保金 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "质保金" }
+        transform:
+          - number_parse: { thousands: ",", decimal: "." }
+          - round: 2
+      - to: { column: 项目 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "项目" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+          - join_agg: { func: concat, sep: ", " }
+      - to: { column: 知识产权归属 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "知识产权归属" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+      - to: { column: 是否对外披露我方信息 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "是否对外披露我方信息" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+      - to: { column: 是否有保函 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "是否有保函" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+      - to: { column: 样件采购申请单号 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "样件采购申请单号" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+      - to: { column: 来源系统业务类型 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "来源系统业务类型" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+      - to: { column: 来源系统名称 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "来源系统名称" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+      - to: { column: 来源系统单号 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "来源系统单号" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+      - to: { column: 门店名称 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "门店名称" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+      - to: { column: 承租地址 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "承租地址" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+      - to: { column: 租赁面积 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "租赁面积" }
+        transform:
+          - number_parse: { thousands: ",", decimal: "." }
+          - round: 2
+      - to: { column: PEA审批记录 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "PEA审批记录" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+      - to: { column: 是否为单方NDA }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "是否为单方NDA" }
+        transform:
+          - json_parse: {}
+          - form_pick: { field: name }
+
+  - name: 付款计划
+    row_key: payment_plan_id
+    row_policy: one_to_many
+    source: payment_plan_list
+    mappings:
+      - to: { column: 合同编码 }
+        from: [{ sheet: payment_plan_list, column: contract_number }]
+      - to: { column: 付款时间 }
+        from: [{ sheet: payment_plan_list, column: payment_date }]
+        transform:
+          - date_parse: { input_formats: ["yyyy-MM-dd", "yyyy/M/d", "yyyy-MM-dd HH:mm:ss"], tz: "Asia/Shanghai" }
+          - date_format: "yyyy-MM-dd"
+      - to: { column: 付款条件 }
+        from: [{ sheet: payment_plan_list, column: payment_condition }]
+        transform: [trim]
+      - to: { column: 付款金额 }
+        from: [{ sheet: payment_plan_list, column: payment_amount }]
+        transform:
+          - number_parse: { thousands: ",", decimal: "." }
+          - round: 2
+      - to: { column: 是否预付 }
+        from: [{ sheet: payment_plan_list, column: prepaid }]
+        transform: [trim]
+      - to: { column: 付款对象 }
+        from: [{ sheet: payment_plan_list, column: payment_counter_party }]
+        transform:
+          - json_parse: {}
+          - form_pick: { field: counter_party_code }
+      - to: { column: 付款说明 }
+        from: [{ sheet: payment_plan_list, column: payment_desc }]
+        transform: [trim]
+      - to: { column: 付款比例（%） }
+        from: [{ sheet: payment_plan_list, column: payment_rate }]
+        transform: [number_parse]
+
+  - name: 预算明细
+    row_key: contract_budget_id
+    row_policy: one_to_many
+    source: contract_budget_list
+    mappings:
+      - to: { column: 合同编码 }
+        from: [{ sheet: contract_budget_list, column: contract_number }]
+      - to: { column: 预算年度 }
+        from: [{ sheet: contract_budget_list, column: budget_year }]
+        transform: [number_parse]
+      - to: { column: 预算部门 }
+        from: [{ sheet: contract_budget_list, column: budget_department_name }]
+        transform: [trim]
+      - to: { column: 会计科目 }
+        from: [{ sheet: contract_budget_list, column: budget_chart_of_account_code }]
+        transform: [trim]
+      - to: { column: 业务场景 }
+        from: [{ sheet: contract_budget_list, column: budget_business_scene_code }]
+        transform: [trim]
+      - to: { column: 项目 }
+        from: [{ sheet: contract_budget_list, column: budget_project_code }]
+        transform: [trim]
+      - to: { column: 产品 }
+        from: [{ sheet: contract_budget_list, column: budget_product_code }]
+        transform: [trim]
+      - to: { column: 金额（含税） }
+        from: [{ sheet: contract_budget_list, column: budget_taxed_amount }]
+        transform:
+          - number_parse: { thousands: ",", decimal: "." }
+          - round: 2
+      - to: { column: 税率（%） }
+        from: [{ sheet: contract_budget_list, column: tax_rate }]
+        transform:
+          - number_parse: { thousands: ",", decimal: "." }
+          - round: 2
+      - to: { column: 税额 }
+        from: [{ sheet: contract_budget_list, column: tax_amount }]
+        transform:
+          - number_parse: { thousands: ",", decimal: "." }
+          - round: 2
+      - to: { column: 金额（不含税） }
+        from: [{ sheet: contract_budget_list, column: budget_occupied_amount }]
+        transform:
+          - number_parse: { thousands: ",", decimal: "." }
+          - round: 2
+
+  - name: 签约信息拟制表单
+    row_key: contract_number
+    row_policy: one_to_one
+    source: form
+    mappings:
+      - to: { column: 合同编码 }
+        from: [{ sheet: form, column: contract_number }]
+      - to: { column: 是否我方先盖章 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "是否我方先盖章" }
+        transform: [trim]
+      - to: { column: 签约方式 }
+        default: "纸质签约"
+
+  - name: 签约信息拟制表单
+    row_key: contract_number
+    row_policy: one_to_one
+    source: form
+    mappings:
+      - to: { column: 合同编码 }
+        from: [{ sheet: form, column: contract_number }]
+
+      - to: { column: 盖章种类 }
+        default: "合同专用章"
+
+      - to: { column: 签约方式 }
+        default: "纸质签约"
+
+  # 相对方：我方与对方两份源表，分别追加写入同一目标Sheet
+  - name: 合同关联相对方（通用）
+    append: true
+    row_key: our_party_id
+    row_policy: one_to_many
+    source: our_party_list
+    mappings:
+      - to: { column: 合同编码 }
+        from: [{ sheet: our_party_list, column: contract_number }]
+      - to: { column: 交易方名称 }
+        from: [{ sheet: our_party_list, column: our_party_name }]
+        transform: [trim]
+      - to: { column: 是否我方 }
+        from: []
+        default: "是"
+      - to: { column: 交易方编码 }
+        from: [{ sheet: our_party_list, column: our_party_code }]
+        transform: [trim]
+      - to: { column: 纳税人识别号 }
+        from: [{ sheet: our_party_list, column: certification_id }]
+        transform: [trim]
+
+  - name: 合同关联相对方（通用）
+    append: true
+    row_key: counter_party_id
+    row_policy: one_to_many
+    source: counter_party_list
+    mappings:
+      - to: { column: 合同编码 }
+        from: [{ sheet: counter_party_list, column: contract_number }]
+      - to: { column: 交易方名称 }
+        from: [{ sheet: counter_party_list, column: counter_party_name }]
+        transform: [trim]
+      - to: { column: 是否我方 }
+        from: []
+        default: "否"
+      - to: { column: 交易方编码 }
+        from: [{ sheet: counter_party_list, column: counter_party_code }]
+        transform: [trim]
+      - to: { column: 纳税人识别号 }
+        from: [{ sheet: counter_party_list, column: certification_id }]
+        transform: [trim]
