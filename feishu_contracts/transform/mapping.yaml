@@ -346,3 +346,18 @@ target_sheets:
       - to: { column: 纳税人识别号 }
         from: [{ sheet: counter_party_list, column: certification_id }]
         transform: [trim]
+
+  - name: 合同关联信息
+    append: true
+    row_key: relation_key
+    row_policy: one_to_many
+    source:  relation_contracts_contracts
+    mappings:
+      - to: { column: 合同编码 }
+        from: [{ sheet: relation_contracts_contracts, column: contract_number }]
+      - to: { column: 关联合同编号 }
+        from: [{ sheet: relation_contracts_contracts, column: related_contract_number }]
+        transform: [trim]
+      - to: { column: 关联合同名称 }
+        from: [{ sheet: relation_contracts_contracts, column: related_contract_name }]
+        transform: [trim]
