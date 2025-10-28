@@ -14,6 +14,9 @@ from openpyxl import load_workbook
 logger = logging.getLogger("transform")
 
 
+LOOKUP_TABLES: Dict[str, Dict[Any, Any]] = {}
+
+
 def _to_str(x: Any) -> str:
     if x is None or (isinstance(x, float) and math.isnan(x)):
         return ""
@@ -29,15 +32,38 @@ def _java_dt_to_py(pattern: str) -> str:
 
 
 def _try_parse_date(txt: str, fmts: List[str]) -> Optional[pd.Timestamp]:
-    if not isinstance(txt, str) or txt.strip() == "":
+    if not isinstance(txt, str):
         return None
+    s = txt.strip()
+    if s == "":
+        return None
+    numeric = s.lstrip("+-")
+    numeric_core = numeric.split(".", 1)[0]
+    if numeric and numeric.replace(".", "", 1).isdigit() and len(numeric_core) >= 10:
+        try:
+            if "." in numeric:
+                value: float | int = float(s)
+            else:
+                value = int(s)
+            digits = len(numeric_core)
+            if digits >= 19:
+                unit = "ns"
+            elif digits >= 16:
+                unit = "us"
+            elif digits >= 13:
+                unit = "ms"
+            else:
+                unit = "s"
+            return pd.to_datetime(value, unit=unit, errors="raise")
+        except Exception:
+            pass
     for f in fmts:
         try:
-            return pd.to_datetime(txt, format=_java_dt_to_py(f), errors="raise")
+            return pd.to_datetime(s, format=_java_dt_to_py(f), errors="raise")
         except Exception:
             continue
     try:
-        return pd.to_datetime(txt, errors="raise")
+        return pd.to_datetime(s, errors="raise")
     except Exception:
         return None
 
@@ -58,6 +84,40 @@ def _number_parse(txt: Any, thousands: str = ",", decimal: str = ".") -> Optiona
         return float(s)
     except Exception:
         return None
+
+
+def _dict_lookup_value(table: Dict[Any, Any], key: Any) -> Optional[Any]:
+    if not table:
+        return None
+    candidates: List[Any] = []
+    seen = set()
+
+    def _push(candidate: Any):
+        if candidate in seen:
+            return
+        seen.add(candidate)
+        candidates.append(candidate)
+
+    _push(key)
+    if isinstance(key, str):
+        stripped = key.strip()
+        if stripped != key:
+            _push(stripped)
+        if stripped:
+            try:
+                _push(int(stripped))
+            except Exception:
+                pass
+    else:
+        try:
+            _push(str(key))
+        except Exception:
+            pass
+
+    for candidate in candidates:
+        if candidate in table:
+            return table[candidate]
+    return None
 
 
 # ---------------- transforms ----------------
@@ -193,6 +253,34 @@ def tf_date_format(values: List[Any], params: Dict[str, Any]):
     return out
 
 
+def tf_dict_lookup(values: List[Any], params: Any) -> List[Any]:
+    if isinstance(params, str):
+        table_name = params
+        default = ""
+        keep_original = True
+    elif isinstance(params, dict):
+        table_name = params.get("table")
+        default = params.get("default", "")
+        keep_original = params.get("keep_original", True)
+    else:
+        return list(values)
+
+    if not table_name:
+        return list(values)
+
+    table = LOOKUP_TABLES.get(table_name, {})
+    out: List[Any] = []
+    for v in values:
+        mapped = _dict_lookup_value(table, v)
+        if mapped is not None:
+            out.append(mapped)
+        elif keep_original and v not in (None, ""):
+            out.append(v)
+        else:
+            out.append(default)
+    return out
+
+
 TRANSFORMS = {
     "trim": tf_trim,
     "json_parse": tf_json_parse,
@@ -204,6 +292,7 @@ TRANSFORMS = {
     "round": tf_round,
     "date_parse": tf_date_parse,
     "date_format": tf_date_format,
+    "dict": tf_dict_lookup,
 }
 
 
@@ -345,6 +434,8 @@ def run(source: str, template: str, mapping_path: str, out_path: str):
     with open(mapping_path, "r", encoding="utf-8") as f:
         mapping = yaml.safe_load(f)
     join_key = next(iter(mapping.get("join", {}).get("keys", {})))  # e.g., contract_number
+    global LOOKUP_TABLES
+    LOOKUP_TABLES = mapping.get("dict")
     df_map = read_excel_all(source)
     wb = load_workbook(template)
 
