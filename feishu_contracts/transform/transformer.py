@@ -239,17 +239,23 @@ def header_index(ws) -> Dict[str, int]:
     return headers
 
 
-def get_values_from_source(df_map: Dict[str, pd.DataFrame], base_row: Dict[str, Any], frm: Dict[str, Any], where: Optional[Dict[str, Any]], join_key: str) -> List[Any]:
+def get_values_from_source(df_map: Dict[str, pd.DataFrame], base_row: Dict[str, Any], frm: Dict[str, Any], where: Optional[Dict[str, Any]], join_key: str, groups: Optional[Dict[str, Any]] = None) -> List[Any]:
     sheet = frm["sheet"]
     col = frm["column"]
     if sheet not in df_map:
         return []
     if sheet == base_row.get("__base_sheet__"):
         return [base_row.get(col, "")]
-    # join by contract_number
     join_val = base_row.get(join_key, "")
-    df = df_map[sheet]
-    q = df[df.get(join_key, pd.Series([""] * len(df))) == join_val]
+    base_df = df_map[sheet]
+    if groups and sheet in groups:
+        grp = groups[sheet]
+        try:
+            q = grp.get_group(join_val)
+        except Exception:
+            q = base_df.iloc[0:0]
+    else:
+        q = base_df[base_df.get(join_key, pd.Series([""] * len(base_df))) == join_val]
     if where:
         for k, v in where.items():
             if k in q.columns:
@@ -259,7 +265,7 @@ def get_values_from_source(df_map: Dict[str, pd.DataFrame], base_row: Dict[str, 
     return []
 
 
-def process_one_to_one(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame], wb, join_key: str) -> int:
+def process_one_to_one(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame], wb, join_key: str, groups: Optional[Dict[str, Any]] = None) -> int:
     """通用的一对一目标表写入：以 details 为基表（如存在），否则以 ts_spec.source 为基表，
     按 join_key 维度聚合同一合同号下其他表的 where 命中行，并执行 transform 链得到单值输出。
     """
@@ -268,7 +274,8 @@ def process_one_to_one(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame],
     base_sheet = "details" if "details" in df_map else ts_spec.get("source")
     base_df = df_map[base_sheet]
     out_rows: List[Dict[str, Any]] = []
-    for _, r in base_df.iterrows():
+    total = len(base_df)
+    for i, (_, r) in enumerate(base_df.iterrows(), start=1):
         base = r.to_dict()
         base["__base_sheet__"] = base_sheet
         row_out: Dict[str, Any] = {}
@@ -281,11 +288,13 @@ def process_one_to_one(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame],
                 vals = []
             else:
                 for f in fr:
-                    vals.extend(get_values_from_source(df_map, base, f, where, join_key))
+                    vals.extend(get_values_from_source(df_map, base, f, where, join_key, groups))
             vals = apply_chain(vals, mp.get("transform", []))
             final = vals[0] if vals else mp.get("default", "")
             row_out[to_col] = final
         out_rows.append(row_out)
+        if i % 1000 == 0:
+            logger.info("progress sheet=%s %d/%d", ts_spec["name"], i, total, extra={"is_progress": True})
     # 追加写入
     start_row = ws.max_row + 1 if ws.max_row >= 1 else 2
     for row in out_rows:
@@ -341,14 +350,39 @@ def run(source: str, template: str, mapping_path: str, out_path: str):
 
     # 逐目标表处理：one_to_one 使用通用聚合；one_to_many 逐行追加
     logger.info("start transform source=%s template=%s mapping=%s out=%s", source, template, mapping_path, out_path, extra={"is_progress": True})
+    used_sheets = set()
+    form_attr_names = set()
+    for ts in mapping.get("target_sheets", []):
+        for mp in ts.get("mappings", []):
+            fr = mp.get("from", [])
+            for f in fr:
+                s = f.get("sheet")
+                if s:
+                    used_sheets.add(s)
+                    if s == "form":
+                        w = mp.get("where", {})
+                        if isinstance(w, dict):
+                            attr = w.get("attribute_name")
+                            if isinstance(attr, str) and attr:
+                                form_attr_names.add(attr)
+    if "form" in df_map and form_attr_names and "attribute_name" in df_map["form"].columns:
+        df_map["form"] = df_map["form"][df_map["form"]["attribute_name"].isin(list(form_attr_names))]
+    groups: Dict[str, Any] = {}
+    for s in used_sheets:
+        df = df_map.get(s)
+        if df is None:
+            continue
+        if join_key in df.columns:
+            groups[s] = df.groupby(join_key)
     for ts in mapping["target_sheets"]:
         name = ts["name"]
         if name not in wb.sheetnames:
             continue
         policy = ts.get("row_policy", "one_to_one")
+        logger.info("begin sheet=%s policy=%s", name, policy, extra={"is_progress": True})
         t0 = time.time()
         if policy == "one_to_one":
-            rows = process_one_to_one(ts, df_map, wb, join_key)
+            rows = process_one_to_one(ts, df_map, wb, join_key, groups)
         else:
             rows = process_simple_append(ts, df_map, wb)
         elapsed = time.time() - t0

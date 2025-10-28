@@ -4,6 +4,7 @@ import json
 import os
 import logging
 from typing import Any, Dict, List, Optional, Tuple
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 
 try:
     import pandas as pd  # type: ignore
@@ -26,6 +27,20 @@ def _to_json_cell_value(v: Any) -> Any:
             except Exception:
                 pass
     return v
+
+
+def _sanitize_excel_text(s: str) -> str:
+    try:
+        return ILLEGAL_CHARACTERS_RE.sub(" ", s)
+    except Exception:
+        return s
+
+
+def _to_excel_cell_value(v: Any) -> Any:
+    v2 = _to_json_cell_value(v)
+    if isinstance(v2, str):
+        return _sanitize_excel_text(v2)
+    return v2
 
 
 def _read_jsonl(path: str) -> List[Dict[str, Any]]:
@@ -270,7 +285,7 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
             with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
                 pd.DataFrame(
                     [{k: rec.get(k, "") for k in base_keys} for rec in records]
-                ).applymap(_to_json_cell_value).to_excel(
+                ).applymap(_to_excel_cell_value).to_excel(
                     writer, index=False, sheet_name="details"
                 )
                 try:
@@ -285,6 +300,7 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
                         df = pd.DataFrame(rows)
                     else:
                         df = pd.DataFrame(columns=["contract_number"])
+                    df = df.applymap(_to_excel_cell_value)
                     df.to_excel(writer, index=False, sheet_name=sheet_name)
                     try:
                         logger.info("write sheet name=%s rows=%d", sheet_name, len(rows))

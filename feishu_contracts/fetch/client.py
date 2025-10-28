@@ -98,128 +98,87 @@ class FeishuTokenManager:
 
 
 class FeishuContractClient:
-    def __init__(self, access_token: str, rate_limiter: Optional[RateLimiter] = None):
+    def __init__(self, access_token: str, rate_limiter: Optional[RateLimiter] = None, token_manager: Optional[FeishuTokenManager] = None):
         self.base_url = "https://open.feishu.cn/open-apis"
         self.headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json; charset=utf-8",
         }
         self.rate_limiter = rate_limiter
+        self._token_manager = token_manager
+        self._token_lock = threading.Lock()
+        self._access_token = access_token
 
-    def search_contracts(self, page_size: int = 50, permission: Optional[int] = 0, max_items: Optional[int] = None) -> List[Dict[str, Any]]:
-        url = f"{self.base_url}/contract/v1/contracts/search"
-        page_token: str = ""
-        items: List[Dict[str, Any]] = []
-        pages = 0
-        while True:
-            body: Dict[str, Any] = {"page_size": page_size}
-            if page_token:
-                body["page_token"] = page_token
-            if permission is not None:
-                body["combine_condition"] = {"permission": permission}
+    def _parse_code(self, value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        try:
+            return int(value)
+        except Exception:
+            return None
 
-            def _fmt_token(t: Optional[str]) -> str:
-                if not t:
-                    return ""
-                s = str(t)
-                return f"{s[:12]}...({len(s)})"
+    def _get_response_code(self, response: Optional[requests.Response]) -> Optional[int]:
+        if response is None:
+            return None
+        try:
+            payload = response.json()
+        except Exception:
+            return None
+        if isinstance(payload, dict):
+            return self._parse_code(payload.get("code"))
+        return None
 
-            _t0 = time.time()
-            page_attempts = 0
-            while True:
-                try:
-                    try:
-                        logger.debug("search page start token=%s", _fmt_token(page_token))
-                    except Exception:
-                        pass
-                    if self.rate_limiter is not None:
-                        self.rate_limiter.acquire()
-                    resp = requests.post(url, headers=self.headers, json=body, timeout=60)
-                    resp.raise_for_status()
-                    break
-                except requests.HTTPError as e:
-                    resp_obj = getattr(e, "response", None)
-                    rstatus = resp_obj.status_code if resp_obj is not None else None
-                    code_val = None
-                    if resp_obj is not None:
-                        try:
-                            rj = resp_obj.json()
-                            code_val = rj.get("code")
-                        except Exception:
-                            pass
-                    if (code_val in (9499, 99991400) or rstatus == 429) and page_attempts < 3:
-                        page_attempts += 1
-                        base = min(2 ** page_attempts, 8.0)
-                        wait = max(0.5, base + base * random.uniform(-0.2, 0.2))
-                        try:
-                            logger.warning(
-                                "rate_limited during search code=%s status=%s wait=%.1fs attempt=%s",
-                                str(code_val), str(rstatus), wait, page_attempts,
-                            )
-                        except Exception:
-                            pass
-                        if self.rate_limiter is not None:
-                            self.rate_limiter.set_cooldown(wait)
-                        time.sleep(wait)
-                        continue
-                    raise
-
-            result = resp.json()
-            if result.get("code") != 0:
-                raise RuntimeError(f"search failed: {result.get('msg')}")
-            data = result.get("data", {})
-            page_items = data.get("items", []) or []
-
-            has_more = bool(data.get("has_more", False) or data.get("hasMore", False))
-            next_token_raw = data.get("page_token") or data.get("pageToken") or ""
+    def _refresh_access_token(self) -> bool:
+        if self._token_manager is None:
+            return False
+        with self._token_lock:
             try:
-                logger.debug(
-                    "search page done items=%d has_more=%s next_token=%s",
-                    len(page_items), str(has_more), _fmt_token(next_token_raw),
-                )
-            except Exception:
-                pass
-
-            items.extend(page_items)
-            if max_items is not None and max_items > 0 and len(items) >= max_items:
-                items = items[:max_items]
-                break
-
-            page_token = next_token_raw
-            pages += 1
-            if not has_more:
-                break
-            time.sleep(0.1)
-        return items
+                new_token = self._token_manager.get_access_token()
+            except Exception as exc:
+                try:
+                    logger.error("refresh access token failed %s", str(exc))
+                except Exception:
+                    pass
+                return False
+            if not new_token:
+                return False
+            self._access_token = new_token
+            self.headers["Authorization"] = f"Bearer {new_token}"
+            return True
 
     def search_contracts_by_number(self, contract_number: str, page_size: int = 50) -> List[Dict[str, Any]]:
         url = f"{self.base_url}/contract/v1/contracts/search"
         page_token: str = ""
         items: List[Dict[str, Any]] = []
         pages = 0
+        token_refresh_attempts = 0
+        max_token_refresh = 3
         while True:
             body: Dict[str, Any] = {"page_size": page_size, "contract_number": contract_number}
             if page_token:
                 body["page_token"] = page_token
             _t0 = time.time()
             attempts = 0
+            result: Dict[str, Any] = {}
             while True:
                 try:
                     if self.rate_limiter is not None:
                         self.rate_limiter.acquire()
                     resp = requests.post(url, headers=self.headers, json=body, timeout=60)
                     resp.raise_for_status()
+                    result = resp.json()
                     break
                 except requests.HTTPError as e:
                     resp_obj = getattr(e, "response", None)
+                    code_val = self._get_response_code(resp_obj)
+                    if code_val == 99991663 and token_refresh_attempts < max_token_refresh:
+                        logger.warning("refresh access token failed %s", str(e))
+                        if self._refresh_access_token():
+                            token_refresh_attempts += 1
+                            continue
                     rstatus = resp_obj.status_code if resp_obj is not None else None
-                    code_val = None
-                    if resp_obj is not None:
-                        try:
-                            rj = resp_obj.json()
-                            code_val = rj.get("code")
-                        except Exception:
-                            pass
                     if (code_val in (9499, 99991400) or rstatus == 429) and attempts < 3:
                         attempts += 1
                         base = min(2 ** attempts, 8.0)
@@ -238,9 +197,14 @@ class FeishuContractClient:
                         continue
                     # graceful degrade: return items collected so far
                     return items
-            result = resp.json()
-            if result.get("code") != 0:
-                raise RuntimeError(f"search by number failed: {result.get('msg')}")
+                code_val = self._parse_code(result.get("code"))
+                if code_val == 99991663 and token_refresh_attempts < max_token_refresh:
+                    if self._refresh_access_token():
+                        token_refresh_attempts += 1
+                        continue
+                if code_val != 0:
+                    raise RuntimeError(f"search by number failed: {result.get('msg')}")
+                break
             data = result.get("data", {})
             page_items = data.get("items", []) or []
             has_more = bool(data.get("has_more", False) or data.get("hasMore", False))
@@ -258,13 +222,33 @@ class FeishuContractClient:
         params: Dict[str, Any] = {}
         if user_id_type:
             params["user_id_type"] = user_id_type
-        if self.rate_limiter is not None:
-            self.rate_limiter.acquire()
-        resp = requests.get(url, headers={"Authorization": self.headers["Authorization"]}, params=params, timeout=60)
-        resp.raise_for_status()
-        result = resp.json()
-        if result.get("code") != 0:
-            raise RuntimeError(f"detail failed for {contract_id}: {result.get('msg')}")
+        token_refresh_attempts = 0
+        max_token_refresh = 3
+        while True:
+            if self.rate_limiter is not None:
+                self.rate_limiter.acquire()
+            try:
+                resp = requests.get(url, headers={"Authorization": self.headers["Authorization"]}, params=params, timeout=60)
+                resp.raise_for_status()
+                result = resp.json()
+            except requests.HTTPError as e:
+                resp_obj = getattr(e, "response", None)
+                code_val = self._get_response_code(resp_obj)
+                if code_val == 99991663 and token_refresh_attempts < max_token_refresh:
+                    logger.warning("refresh access token failed %s", str(e))
+                    if self._refresh_access_token():
+                        token_refresh_attempts += 1
+                        continue
+                raise
+            code_val = self._parse_code(result.get("code"))
+            if code_val == 99991663 and token_refresh_attempts < max_token_refresh:
+                logger.warning("refresh access token failed %s", str(e))
+                if self._refresh_access_token():
+                    token_refresh_attempts += 1
+                    continue
+            if code_val != 0:
+                raise RuntimeError(f"detail failed for {contract_id}: {result.get('msg')}")
+            break
         data = result.get("data", {})
         if isinstance(data, dict) and "contract" in data:
             detail = data.get("contract")
@@ -512,7 +496,7 @@ def run_fetch(cfg: FetchConfig) -> Dict[str, Any]:
     token_manager = FeishuTokenManager(cfg.app_key, cfg.app_secret)
     access_token = token_manager.get_access_token()
     rate_limiter = RateLimiter(cfg.rate_limit_qps, 1.0)
-    client = FeishuContractClient(access_token, rate_limiter=rate_limiter)
+    client = FeishuContractClient(access_token, rate_limiter=rate_limiter, token_manager=token_manager)
 
     codes = _load_contract_codes(cfg.contract_codes_file, cfg.contract_codes)
     if not codes:
