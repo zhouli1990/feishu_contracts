@@ -1,4 +1,6 @@
 pandas>=1.5,<3
+python-dateutil>=2.8.2
 openpyxl>=3.1
 PyYAML>=6.0
 requests>=2.31
+six>=1.16

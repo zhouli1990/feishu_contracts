@@ -350,7 +350,7 @@ target_sheets:
           - json_parse: {}
           - form_pick: { field: name }
 
-  - name: 签约方全量字段
+  - name: 签约方
     row_key: contract_number
     row_policy: one_to_one
     source: form
@@ -423,18 +423,8 @@ target_sheets:
         transform: [trim]
 dict:
   合同状态:
-    0: "正编辑"
-    1: "已作废"
-    2: "已撤回"
-    3: "审批中"
-    4: "已拒绝"
-    6: "签订中"
-    8: "归档中"
     9: "已归档"
-    10: "变更中"
-    11: "已变更"
-    16: "终止中"
+    10: "已归档"
+    11: "已归档"
+    16: "已归档"
     17: "已终止"
-    23: "已完成"
-    30: "协商中"
-    31: "协商草稿编辑中"
