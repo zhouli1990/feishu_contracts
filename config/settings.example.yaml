@@ -23,3 +23,41 @@ fetch:
 options:
   excel_engine: openpyxl
   encoding: utf-8-sig
+  text_columns:
+    - contract_id
+    - create_employee_id
+    - form_id
+    - group_id
+    - owner_employee_id
+    - previous_id
+    - saas_department_id
+    - submitter_employee_id
+    - template_id
+    
+# 日志模块配置，无需修改
+logging:
+  level: DEBUG            # 全局最低级别：DEBUG/INFO/WARNING/ERROR
+  console: true          # 是否输出到控制台
+  console_level: INFO    # 控制台级别，可与文件不同
+  json: false            # 文件是否使用 JSON 格式；console 固定简版文本
+  progress_interval: 1 # 每处理 N 条输出一次进度
+
+  # 文件命名与运行批次
+  naming:
+    mode: timestamp                 # timestamp: 文件名包含 run_id
+    pattern: "{stage}_{run_id}.log" # 可用变量：{stage}、{run_id}
+    run_id_format: "%Y%m%d_%H%M%S"  # 运行批次ID格式
+
+  # 轮转与保留策略
+  rotation:
+    mode: none          # none | time；none 表示不切分文件
+    when: D             # 仅当 mode=time 生效：S/M/H/D/W0-6/MIDNIGHT
+    interval: 1
+    backup_count: 0     # 0 表示不删除历史（TimedRotating 有效）
+
+  # 日志输出目录（最终文件名由 naming.pattern 生成）
+  files:
+    pipeline: logs/
+    fetch: logs/
+    convert: logs/
+    transform: logs/

@@ -51,7 +51,8 @@ def main():
 
     encoding = (options.get("encoding") or "utf-8-sig") if isinstance(options, dict) else "utf-8-sig"
     logging.info(f"convert_jsonl start: input={input_path}, csv={csv_path}, excel={excel_path}, encoding={encoding}")
-    result = convert_jsonl(input_path, csv_path, excel_path, encoding=encoding)
+    text_columns = (options.get("text_columns") or []) if isinstance(options, dict) else []
+    result = convert_jsonl(input_path, csv_path, excel_path, encoding=encoding, text_columns=text_columns)
     logging.info(f"convert_jsonl done: result={result}")
 
     parts = [f"CSV: {result['csv']}"]

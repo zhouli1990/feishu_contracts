@@ -65,6 +65,7 @@ def main() -> None:
         final_csv=csv_output,
         output_xlsx=excel_output,
         encoding=(options.get("encoding") or "utf-8-sig") if isinstance(options, dict) else "utf-8-sig",
+        text_columns=(options.get("text_columns") or []) if isinstance(options, dict) else [],
     )
     _fetch_result = run_fetch(fetch_cfg)
     logger.info("[1/3] 抓取完成")

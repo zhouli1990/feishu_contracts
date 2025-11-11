@@ -38,6 +38,7 @@ class FetchConfig:
     final_csv: str = "contracts_details.csv"
     output_xlsx: Optional[str] = None
     encoding: str = "utf-8-sig"
+    text_columns: Optional[List[str]] = None
 
     def __post_init__(self) -> None:
         if self.contract_codes is None:
@@ -305,7 +306,7 @@ def _append_jsonl_line(path: str, obj: Dict[str, Any]) -> None:
         f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
-def _write_status_csv(path: str, rows: List[Dict[str, Any]], append: bool = False, encoding: str = "utf-8") -> None:
+def _write_status_csv(path: str, rows: List[Dict[str, Any]], append: bool = False, encoding: str = "utf-8", text_columns: Optional[List[str]] = None) -> None:
     import csv
     fieldnames = ["contract_code", "contract_id", "status", "error", "attempt"]
     file_exists = os.path.exists(path)
@@ -316,7 +317,15 @@ def _write_status_csv(path: str, rows: List[Dict[str, Any]], append: bool = Fals
         if write_header:
             w.writeheader()
         for r in rows:
-            w.writerow({k: r.get(k, "") for k in fieldnames})
+            out = {k: r.get(k, "") for k in fieldnames}
+            if text_columns:
+                for col in text_columns:
+                    if col in out:
+                        s = "" if out[col] is None else str(out[col])
+                        if not s.startswith("'"):
+                            s = "'" + s
+                        out[col] = s
+            w.writerow(out)
 
 
 def _load_contract_codes(contract_codes_file: Optional[str], inline_codes: List[str]) -> List[str]:
@@ -541,7 +550,7 @@ def run_fetch(cfg: FetchConfig) -> Dict[str, Any]:
             )
         except Exception:
             pass
-        _write_status_csv(cfg.status_csv, status_rows, append=(attempt > 1), encoding=cfg.encoding)
+        _write_status_csv(cfg.status_csv, status_rows, append=(attempt > 1), encoding=cfg.encoding, text_columns=(cfg.text_columns or []))
         if not failed_codes:
             break
         if attempt >= total_passes:
@@ -557,7 +566,7 @@ def run_fetch(cfg: FetchConfig) -> Dict[str, Any]:
         )
     except Exception:
         pass
-    convert_result = convert_jsonl(cfg.output_jsonl, cfg.final_csv, cfg.output_xlsx, encoding=cfg.encoding)
+    convert_result = convert_jsonl(cfg.output_jsonl, cfg.final_csv, cfg.output_xlsx, encoding=cfg.encoding, text_columns=(cfg.text_columns or []))
     try:
         convert_logger.info(
             "convert done csv=%s xlsx=%s",

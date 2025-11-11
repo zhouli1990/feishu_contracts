@@ -3,7 +3,7 @@ import csv
 import json
 import os
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 
 try:
@@ -88,7 +88,7 @@ def _split_keys(records: List[Dict[str, Any]]) -> Tuple[List[str], List[str]]:
     return base_keys, sorted(list_keys)
 
 
-def _write_main_csv(records: List[Dict[str, Any]], keys: List[str], csv_path: str, encoding: str) -> None:
+def _write_main_csv(records: List[Dict[str, Any]], keys: List[str], csv_path: str, encoding: str, text_columns: Optional[Set[str]] = None) -> None:
     with open(csv_path, "w", newline="", encoding=encoding) as f:
         writer = csv.DictWriter(f, fieldnames=keys)
         writer.writeheader()
@@ -96,9 +96,16 @@ def _write_main_csv(records: List[Dict[str, Any]], keys: List[str], csv_path: st
             out: Dict[str, Any] = {}
             for key in keys:
                 if key in row:
-                    out[key] = _to_json_cell_value(row.get(key))
+                    v = _to_json_cell_value(row.get(key))
                 else:
-                    out[key] = ""
+                    v = ""
+                if text_columns and key in text_columns:
+                    s = "" if v is None else str(v)
+                    if not s.startswith("'"):
+                        s = "'" + s
+                    out[key] = s
+                else:
+                    out[key] = v
             writer.writerow(out)
 
 
@@ -216,7 +223,7 @@ def _build_relation_contracts_contracts_table(records: List[Dict[str, Any]]) -> 
     return rows
 
 
-def _write_list_csv(path: str, rows: List[Dict[str, Any]], encoding: str) -> None:
+def _write_list_csv(path: str, rows: List[Dict[str, Any]], encoding: str, text_columns: Optional[Set[str]] = None) -> None:
     fieldnames = (
         sorted({k for r in rows for k in r.keys()}) if rows else ["contract_number"]
     )
@@ -226,11 +233,18 @@ def _write_list_csv(path: str, rows: List[Dict[str, Any]], encoding: str) -> Non
         for row in rows:
             out: Dict[str, Any] = {}
             for key in fieldnames:
-                out[key] = row.get(key, "")
+                v = row.get(key, "")
+                if text_columns and key in text_columns:
+                    s = "" if v is None else str(v)
+                    if not s.startswith("'"):
+                        s = "'" + s
+                    out[key] = s
+                else:
+                    out[key] = v
             writer.writerow(out)
 
 
-def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = None, encoding: str = "utf-8-sig") -> Dict[str, Any]:
+def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = None, encoding: str = "utf-8-sig", text_columns: Optional[List[str]] = None) -> Dict[str, Any]:
     records = _read_jsonl(jsonl_path)
     try:
         logger.info(
@@ -252,7 +266,7 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
         elif excel_path:
             base = os.path.splitext(excel_path)[0]
             result["list_csvs"] = {}
-            _write_list_csv(f"{base}_details.csv", [], encoding)
+            _write_list_csv(f"{base}_details.csv", [], encoding, set(text_columns or []))
             result["list_csvs"]["details"] = f"{base}_details.csv"
         try:
             logger.info("done empty jsonl csv=%s xlsx=%s", result.get("csv"), result.get("excel"), extra={"is_progress": True})
@@ -265,7 +279,7 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
         logger.debug("split keys base=%d list=%d", len(base_keys), len(list_keys))
     except Exception:
         pass
-    _write_main_csv(records, base_keys, csv_path, encoding)
+    _write_main_csv(records, base_keys, csv_path, encoding, set(text_columns or []))
     try:
         logger.info("write main csv rows=%d path=%s", len(records), csv_path)
     except Exception:
@@ -283,11 +297,13 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
     if excel_path:
         if pd is not None:
             with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-                pd.DataFrame(
+                df_main = pd.DataFrame(
                     [{k: rec.get(k, "") for k in base_keys} for rec in records]
-                ).applymap(_to_excel_cell_value).to_excel(
-                    writer, index=False, sheet_name="details"
-                )
+                ).applymap(_to_excel_cell_value)
+                for col in (text_columns or []):
+                    if col in df_main.columns:
+                        df_main[col] = df_main[col].map(lambda x: "" if x is None else str(x))
+                df_main.to_excel(writer, index=False, sheet_name="details")
                 try:
                     logger.info("write sheet name=%s rows=%d", "details", len(records))
                 except Exception:
@@ -301,6 +317,9 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
                     else:
                         df = pd.DataFrame(columns=["contract_number"])
                     df = df.applymap(_to_excel_cell_value)
+                    for col in (text_columns or []):
+                        if col in df.columns:
+                            df[col] = df[col].map(lambda x: "" if x is None else str(x))
                     df.to_excel(writer, index=False, sheet_name=sheet_name)
                     try:
                         logger.info("write sheet name=%s rows=%d", sheet_name, len(rows))
@@ -312,7 +331,7 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
             for key in list_keys:
                 rows = list_tables.get(key, [])
                 path = f"{base}_{key}.csv"
-                _write_list_csv(path, rows, encoding)
+                _write_list_csv(path, rows, encoding, set(text_columns or []))
                 result["list_csvs"][key] = path
                 try:
                     logger.info("write list csv name=%s rows=%d path=%s", key, len(rows), path)
