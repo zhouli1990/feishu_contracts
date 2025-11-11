@@ -88,8 +88,8 @@ def _split_keys(records: List[Dict[str, Any]]) -> Tuple[List[str], List[str]]:
     return base_keys, sorted(list_keys)
 
 
-def _write_main_csv(records: List[Dict[str, Any]], keys: List[str], csv_path: str) -> None:
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+def _write_main_csv(records: List[Dict[str, Any]], keys: List[str], csv_path: str, encoding: str) -> None:
+    with open(csv_path, "w", newline="", encoding=encoding) as f:
         writer = csv.DictWriter(f, fieldnames=keys)
         writer.writeheader()
         for row in records:
@@ -216,11 +216,11 @@ def _build_relation_contracts_contracts_table(records: List[Dict[str, Any]]) -> 
     return rows
 
 
-def _write_list_csv(path: str, rows: List[Dict[str, Any]]) -> None:
+def _write_list_csv(path: str, rows: List[Dict[str, Any]], encoding: str) -> None:
     fieldnames = (
         sorted({k for r in rows for k in r.keys()}) if rows else ["contract_number"]
     )
-    with open(path, "w", newline="", encoding="utf-8") as f:
+    with open(path, "w", newline="", encoding=encoding) as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
@@ -230,7 +230,7 @@ def _write_list_csv(path: str, rows: List[Dict[str, Any]]) -> None:
             writer.writerow(out)
 
 
-def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = None) -> Dict[str, Any]:
+def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = None, encoding: str = "utf-8-sig") -> Dict[str, Any]:
     records = _read_jsonl(jsonl_path)
     try:
         logger.info(
@@ -241,7 +241,7 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
     except Exception:
         pass
     if not records:
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        with open(csv_path, "w", newline="", encoding=encoding) as f:
             writer = csv.writer(f)
             writer.writerow([])
         result: Dict[str, Any] = {"csv": csv_path, "excel": None, "list_csvs": {}}
@@ -252,7 +252,7 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
         elif excel_path:
             base = os.path.splitext(excel_path)[0]
             result["list_csvs"] = {}
-            _write_list_csv(f"{base}_details.csv", [])
+            _write_list_csv(f"{base}_details.csv", [], encoding)
             result["list_csvs"]["details"] = f"{base}_details.csv"
         try:
             logger.info("done empty jsonl csv=%s xlsx=%s", result.get("csv"), result.get("excel"), extra={"is_progress": True})
@@ -265,7 +265,7 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
         logger.debug("split keys base=%d list=%d", len(base_keys), len(list_keys))
     except Exception:
         pass
-    _write_main_csv(records, base_keys, csv_path)
+    _write_main_csv(records, base_keys, csv_path, encoding)
     try:
         logger.info("write main csv rows=%d path=%s", len(records), csv_path)
     except Exception:
@@ -312,7 +312,7 @@ def convert_jsonl(jsonl_path: str, csv_path: str, excel_path: Optional[str] = No
             for key in list_keys:
                 rows = list_tables.get(key, [])
                 path = f"{base}_{key}.csv"
-                _write_list_csv(path, rows)
+                _write_list_csv(path, rows, encoding)
                 result["list_csvs"][key] = path
                 try:
                     logger.info("write list csv name=%s rows=%d path=%s", key, len(rows), path)

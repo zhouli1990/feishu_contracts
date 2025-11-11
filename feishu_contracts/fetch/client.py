@@ -37,6 +37,7 @@ class FetchConfig:
     status_csv: str = "contracts_status.csv"
     final_csv: str = "contracts_details.csv"
     output_xlsx: Optional[str] = None
+    encoding: str = "utf-8-sig"
 
     def __post_init__(self) -> None:
         if self.contract_codes is None:
@@ -304,12 +305,12 @@ def _append_jsonl_line(path: str, obj: Dict[str, Any]) -> None:
         f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
-def _write_status_csv(path: str, rows: List[Dict[str, Any]], append: bool = False) -> None:
+def _write_status_csv(path: str, rows: List[Dict[str, Any]], append: bool = False, encoding: str = "utf-8") -> None:
     import csv
     fieldnames = ["contract_code", "contract_id", "status", "error", "attempt"]
     file_exists = os.path.exists(path)
     mode = "a" if append else "w"
-    with open(path, mode, newline="", encoding="utf-8") as f:
+    with open(path, mode, newline="", encoding=encoding) as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         write_header = not append or not file_exists or os.path.getsize(path) == 0
         if write_header:
@@ -540,7 +541,7 @@ def run_fetch(cfg: FetchConfig) -> Dict[str, Any]:
             )
         except Exception:
             pass
-        _write_status_csv(cfg.status_csv, status_rows, append=(attempt > 1))
+        _write_status_csv(cfg.status_csv, status_rows, append=(attempt > 1), encoding=cfg.encoding)
         if not failed_codes:
             break
         if attempt >= total_passes:
@@ -556,7 +557,7 @@ def run_fetch(cfg: FetchConfig) -> Dict[str, Any]:
         )
     except Exception:
         pass
-    convert_result = convert_jsonl(cfg.output_jsonl, cfg.final_csv, cfg.output_xlsx)
+    convert_result = convert_jsonl(cfg.output_jsonl, cfg.final_csv, cfg.output_xlsx, encoding=cfg.encoding)
     try:
         convert_logger.info(
             "convert done csv=%s xlsx=%s",

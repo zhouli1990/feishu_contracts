@@ -28,6 +28,7 @@ def main() -> None:
     conv = cfg.get("convert", {})
     feishu = cfg.get("feishu", {})
     fetch = cfg.get("fetch", {})
+    options = cfg.get("options", {})
 
     # validate credentials
     app_key = (feishu.get("app_key") or "").strip()
@@ -63,6 +64,7 @@ def main() -> None:
         status_csv=status_csv,
         final_csv=csv_output,
         output_xlsx=excel_output,
+        encoding=(options.get("encoding") or "utf-8-sig") if isinstance(options, dict) else "utf-8-sig",
     )
     _fetch_result = run_fetch(fetch_cfg)
     logger.info("[1/3] 抓取完成")

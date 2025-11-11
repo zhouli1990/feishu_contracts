@@ -26,6 +26,7 @@ def main():
 
     cfg = load_settings(args.config)
     conv = cfg.get("convert", {}) if isinstance(cfg, dict) else {}
+    options = cfg.get("options", {}) if isinstance(cfg, dict) else {}
 
     input_path = args.input or conv.get("jsonl_input")
     csv_path = args.csv or conv.get("csv_output")
@@ -48,8 +49,9 @@ def main():
         if excel_dir:
             os.makedirs(excel_dir, exist_ok=True)
 
-    logging.info(f"convert_jsonl start: input={input_path}, csv={csv_path}, excel={excel_path}")
-    result = convert_jsonl(input_path, csv_path, excel_path)
+    encoding = (options.get("encoding") or "utf-8-sig") if isinstance(options, dict) else "utf-8-sig"
+    logging.info(f"convert_jsonl start: input={input_path}, csv={csv_path}, excel={excel_path}, encoding={encoding}")
+    result = convert_jsonl(input_path, csv_path, excel_path, encoding=encoding)
     logging.info(f"convert_jsonl done: result={result}")
 
     parts = [f"CSV: {result['csv']}"]

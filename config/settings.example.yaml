@@ -22,4 +22,4 @@ fetch:
 
 options:
   excel_engine: openpyxl
-  encoding: utf-8
+  encoding: utf-8-sig
