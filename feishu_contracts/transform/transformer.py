@@ -253,6 +253,54 @@ def tf_date_format(values: List[Any], params: Dict[str, Any]):
     return out
 
 
+def tf_to_value_label(values: List[Any], params: Dict[str, Any]) -> List[Any]:
+    value_field = params.get("value_field")
+    label_field = params.get("label_field")
+    table_name = params.get("value_dict")
+    keep_original = params.get("keep_original", True)
+    default = params.get("default", "")
+    unique = params.get("unique", True)
+
+    table = LOOKUP_TABLES.get(table_name) if table_name else None
+    res: List[Any] = []
+    for v in values:
+        seq = v if isinstance(v, list) else [v]
+        for item in seq:
+            if isinstance(item, dict):
+                raw_val = item.get(value_field)
+                mapped = None
+                if table is not None:
+                    mapped = _dict_lookup_value(table, raw_val)
+                if mapped is not None:
+                    final_val = mapped
+                elif keep_original and raw_val not in (None, ""):
+                    final_val = raw_val
+                else:
+                    final_val = default
+                label_val = item.get(label_field)
+                res.append({"value": final_val, "label": label_val})
+            else:
+                if item not in (None, ""):
+                    res.append({"value": item, "label": None})
+    if unique:
+        seen = set(); tmp: List[Any] = []
+        for x in res:
+            key = json.dumps(x, ensure_ascii=False, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            tmp.append(x)
+        res = tmp
+    return res
+
+
+def tf_json_stringify(values: List[Any], _params: Dict[str, Any]) -> List[Any]:
+    try:
+        return [json.dumps(values, ensure_ascii=False)]
+    except Exception:
+        return [str(values)]
+
+
 def tf_dict_lookup(values: List[Any], params: Any) -> List[Any]:
     if isinstance(params, str):
         table_name = params
@@ -292,6 +340,8 @@ TRANSFORMS = {
     "round": tf_round,
     "date_parse": tf_date_parse,
     "date_format": tf_date_format,
+    "to_value_label": tf_to_value_label,
+    "json_stringify": tf_json_stringify,
     "dict": tf_dict_lookup,
 }
 
@@ -435,7 +485,34 @@ def run(source: str, template: str, mapping_path: str, out_path: str):
         mapping = yaml.safe_load(f)
     join_key = next(iter(mapping.get("join", {}).get("keys", {})))  # e.g., contract_number
     global LOOKUP_TABLES
-    LOOKUP_TABLES = mapping.get("dict")
+    LOOKUP_TABLES = mapping.get("dict", {}) or {}
+    for ds in (mapping.get("dict_sources") or []):
+        try:
+            name = ds.get("name"); path = ds.get("path")
+            sheet = ds.get("sheet")
+            key_col = ds.get("key_column"); val_col = ds.get("value_column")
+            if not name or not path or not key_col or not val_col:
+                continue
+            if not os.path.isabs(path):
+                base_dir = os.path.dirname(mapping_path)
+                path = os.path.normpath(os.path.join(base_dir, path))
+            df = pd.read_excel(path, sheet_name=(sheet if sheet else 0), dtype=str)
+            if isinstance(df, dict):
+                if sheet and sheet in df:
+                    df = df[sheet]
+                else:
+                    df = list(df.values())[0]
+            df = df.fillna("")
+            table: Dict[Any, Any] = {}
+            for _, r in df.iterrows():
+                k = str(r.get(key_col, "")).strip()
+                v = str(r.get(val_col, "")).strip()
+                if k != "":
+                    table[k] = v
+            LOOKUP_TABLES[name] = table
+            logger.info("loaded dict source name=%s path=%s size=%d", name, path, len(table))
+        except Exception as e:
+            logger.warning("failed to load dict source name=%s path=%s error=%s", ds.get("name"), ds.get("path"), e)
     df_map = read_excel_all(source)
     wb = load_workbook(template)
 

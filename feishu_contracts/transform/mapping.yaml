@@ -26,7 +26,7 @@ target_sheets:
         from: [{ sheet: details, column: contract_status_code }]
         transform: 
          - { dict: { table: 合同状态, default: "" } }
-      - to: { column: 合同名称（支持要素提取） }
+      - to: { column: 合同名称 }
         from: [{ sheet: details, column: contract_name }]
         transform: [trim]
         required: true
@@ -42,12 +42,14 @@ target_sheets:
       - to: { column: 计价方式 }
         from: [{ sheet: details, column: property_type_name }]
         transform: [trim]
-      - to: { column: 合同总额 }
+      - to: { column: 合同性质 }
+        default: "单次合同"
+      - to: { column: 合同总额（含税） }
         from: [{ sheet: details, column: amount }]
         transform:
           - number_parse: { thousands: ",", decimal: "." }
           - round: 4
-      - to: { column: 预估金额 }
+      - to: { column: 预估金额（含税） }
         from: [{ sheet: details, column: estimated_amount }]
         transform:
           - number_parse: { thousands: ",", decimal: "." }
@@ -55,23 +57,23 @@ target_sheets:
       - to: { column: 币种 }
         from: [{ sheet: details, column: currency_name }]
         transform: [trim]
-      - to: { column: 合同期限类型（支持要素提取） }
+      - to: { column: 合同期限类型 }
         from: [{ sheet: details, column: fixed_validity_name }]
         transform: [trim]
-      - to: { column: 合同期限说明（支持要素提取） }
+      - to: { column: 合同期限说明 }
         from: [{ sheet: details, column: validity_date_desc }]
         transform: [trim]
-      - to: { column: 有效日期从（支持要素提取） }
+      - to: { column: 有效日期从 }
         from: [{ sheet: details, column: start_date }]
         transform:
           - date_parse: { input_formats: ["yyyy-MM-dd", "yyyy/M/d", "yyyy/M/dd"], tz: "Asia/Shanghai" }
           - date_format: "yyyy-MM-dd"
-      - to: { column: 有效日期至（支持要素提取） }
+      - to: { column: 有效日期至 }
         from: [{ sheet: details, column: end_date }]
         transform:
           - date_parse: { input_formats: ["yyyy-MM-dd", "yyyy/M/d", "yyyy/M/dd"], tz: "Asia/Shanghai" }
           - date_format: "yyyy-MM-dd"
-      - to: { column: 合同申请时间 }
+      - to: { column: 创建时间 }
         from: [{ sheet: details, column: create_time }]
         transform:
           - date_parse: { input_formats: ["yyyy-MM-dd HH:mm:ss", "yyyy/M/d H:mm", "yyyy-MM-dd"], tz: "Asia/Shanghai" }
@@ -94,35 +96,30 @@ target_sheets:
         transform: [trim]
 
       # form 长表字段：按 attribute_name 过滤，取 attribute_value
-      - to: { column: 需求人userId }
+      - to: { column: 需求人 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "需求人" }
         transform:
           - json_parse: {}
-          - form_pick: { field: user_id, unique: true }
-          - join_agg: { func: concat, sep: ", " }
-      - to: { column: 需求人名称 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "需求人" }
-        transform:
-          - json_parse: {}
-          - form_pick: { field: name, unique: true }
-          - join_agg: { func: concat, sep: ", " }
-      - to: { column: 需求人部门open_id }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "需求人部门" }
-        transform:
-          - json_parse: {}
-          - form_pick: { field: open_department_id, unique: true }
-          - join_agg: { func: concat, sep: ", " }
-      - to: { column: 需求人部门名称 }
+          - form_pick: { field_pairs: [name, user_id], unique: true }
+          - to_value_label:
+              value_field: user_id
+              label_field: name
+              value_dict: 员工映射
+              keep_original: true
+              default: ""
+          - json_stringify: {}
+      - to: { column: 需求人部门 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "需求人部门" }
         transform:
           - json_parse: {}
-          - form_pick: { field: name, unique: true }
-          - join_agg: { func: concat, sep: ", " }
-      - to: { column: 履约保证金（支持要素提取） }
+          - form_pick: { field_pairs: [name, lark_department_id], unique: true }
+          - to_value_label:
+              value_field: lark_department_id
+              label_field: name
+          - json_stringify: {}
+      - to: { column: 履约保证金 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "履约保证金" }
         transform:
@@ -134,7 +131,7 @@ target_sheets:
         transform:
           - number_parse: { thousands: ",", decimal: "." }
           - round: 2
-      - to: { column: 项目 }
+      - to: { column: 产品名称 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "项目" }
         transform:
@@ -213,70 +210,68 @@ target_sheets:
           - json_parse: {}
           - form_pick: { field: name }
       # form 长表字段-历史合同
-      - to: { column: 需求人userId }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "L需求人" }
-        transform:
-          - json_parse: {}
-          - form_pick: { field: user_id, unique: true }
-          - join_agg: { func: concat, sep: ", " }
-      - to: { column: 需求人名称 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "L需求人" }
-        transform:
-          - json_parse: {}
-          - form_pick: { field: name, unique: true }
-          - join_agg: { func: concat, sep: ", " }
-      - to: { column: 需求人部门open_id }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "L需求人部门" }
-        transform:
-          - json_parse: {}
-          - form_pick: { field: open_department_id, unique: true }
-          - join_agg: { func: concat, sep: ", " }
-      - to: { column: 需求人部门名称 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "L需求人部门" }
-        transform:
-          - json_parse: {}
-          - form_pick: { field: name, unique: true }
-          - join_agg: { func: concat, sep: ", " }
-      - to: { column: 项目 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "L项目" }
-        transform:
-          - json_parse: {}
-          - form_pick: { field: name }
-      - to: { column: 是否对外披露我方信息 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "L是否对外披露我方信息" }
-        transform:
-          - json_parse: {}
-          - form_pick: { field: name }
-      - to: { column: L对方主体 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "L对方主体" }
-        transform: [trim]
-      - to: { column: 是否有保函 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "L是否有保函" }
-        transform:
-          - json_parse: {}
-          - form_pick: { field: name }
-      - to: { column: L创建时间 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "L创建时间" }
-        transform: 
-          - date_parse: { input_formats: ["yyyy-MM-dd", "yyyy/M/d", "yyyy-MM-dd HH:mm:ss"], tz: "Asia/Shanghai" }
-          - date_format: "yyyy-MM-dd"
+      # - to: { column: 需求人 }
+      #   from: [{ sheet: form, column: attribute_value }]
+      #   where: { attribute_name: "L需求人" }
+      #   transform:
+      #     - json_parse: {}
+      #     - form_pick: { field_pairs: [name, user_id], unique: true }
+      #     - to_value_label:
+      #         value_field: user_id
+      #         label_field: name
+      #         value_dict: 员工映射
+      #         keep_original: true
+      #         default: ""
+      #     - json_stringify: {}
+      # - to: { column: 需求人部门 }
+      #   from: [{ sheet: form, column: attribute_value }]
+      #   where: { attribute_name: "L需求人部门" }
+      #   transform:
+      #     - json_parse: {}
+      #     - form_pick: { field_pairs: [name, lark_department_id], unique: true }
+      #     - to_value_label:
+      #         value_field: lark_department_id
+      #         label_field: name
+      #     - json_stringify: {}
+      # - to: { column: 产品名称 }
+      #   from: [{ sheet: form, column: attribute_value }]
+      #   where: { attribute_name: "L项目" }
+      #   transform:
+      #     - json_parse: {}
+      #     - form_pick: { field: name }
+      # - to: { column: 是否对外披露我方信息 }
+      #   from: [{ sheet: form, column: attribute_value }]
+      #   where: { attribute_name: "L是否对外披露我方信息" }
+      #   transform:
+      #     - json_parse: {}
+      #     - form_pick: { field: name }
+      # - to: { column: L对方主体 }
+      #   from: [{ sheet: form, column: attribute_value }]
+      #   where: { attribute_name: "L对方主体" }
+      #   transform: [trim]
+      # - to: { column: 是否有保函 }
+      #   from: [{ sheet: form, column: attribute_value }]
+      #   where: { attribute_name: "L是否有保函" }
+      #   transform:
+      #     - json_parse: {}
+      #     - form_pick: { field: name }
+      # - to: { column: 创建时间 }
+      #   from: [{ sheet: form, column: attribute_value }]
+      #   where: { attribute_name: "L创建时间" }
+      #   transform: 
+      #     - date_parse: { input_formats: ["yyyy-MM-dd", "yyyy/M/d", "yyyy-MM-dd HH:mm:ss"], tz: "Asia/Shanghai" }
+      #     - date_format: "yyyy-MM-dd"
+
 
   - name: 付款计划
-    row_key: payment_plan_id
+    row_key: uuid
     row_policy: one_to_many
     source: payment_plan_list
     mappings:
       - to: { column: 合同编码 }
         from: [{ sheet: payment_plan_list, column: contract_number }]
+      - to: { column: uuid }
+        from: [{ sheet: payment_plan_list, column: uuid }]
       - to: { column: 付款时间 }
         from: [{ sheet: payment_plan_list, column: payment_date }]
         transform:
@@ -304,14 +299,20 @@ target_sheets:
       - to: { column: 付款比例（%） }
         from: [{ sheet: payment_plan_list, column: payment_rate }]
         transform: [number_parse]
+      - to: { column: 是否需要验收 }
+        from: [{ sheet: payment_plan_list, column: need_check }]
+        transform:
+          - { dict: { table: 是否需要验收, default: "" } }
 
   - name: 预算明细
-    row_key: contract_budget_id
+    row_key: uuid
     row_policy: one_to_many
     source: contract_budget_list
     mappings:
       - to: { column: 合同编码 }
         from: [{ sheet: contract_budget_list, column: contract_number }]
+      - to: { column: uuid }
+        from: [{ sheet: contract_budget_list, column: uuid }]
       - to: { column: 预算年度 }
         from: [{ sheet: contract_budget_list, column: budget_year }]
         transform: [number_parse]
@@ -387,12 +388,12 @@ target_sheets:
       - to: { column: 签约方式 }
         default: "纸质签约"
       # 历史合同字段
-      - to: { column: 是否我方先盖章 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "L是否我方先盖章" }
-        transform:
-          - json_parse: {}
-          - form_pick: { field: name }
+      # - to: { column: 是否我方先盖章 }
+      #   from: [{ sheet: form, column: attribute_value }]
+      #   where: { attribute_name: "L是否我方先盖章" }
+      #   transform:
+      #     - json_parse: {}
+      #     - form_pick: { field: name }
 
   - name: 签约方
     row_key: contract_number
@@ -465,6 +466,7 @@ target_sheets:
       - to: { column: 关联合同名称 }
         from: [{ sheet: relation_contracts_contracts, column: related_contract_name }]
         transform: [trim]
+
 dict:
   合同状态:
     9: "已归档"
@@ -483,3 +485,15 @@ dict:
     1: "J6"
     3: "J7"
     5: "J8"
+
+  是否需要验收:
+    TRUE: "是"
+    FALSE: "否"
+
+# 表映射，会自动解析到dict字典里，形成GLOBLA缓存
+dict_sources:
+  - name: 员工映射
+    path: ./dicts/hpfm_employee.xlsx
+    sheet: hpfm_employee
+    key_column: attribute3
+    value_column: employee_num
