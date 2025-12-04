@@ -556,7 +556,13 @@ def run(source: str, template: str, mapping_path: str, out_path: str):
         elapsed = time.time() - t0
         logger.info("sheet=%s policy=%s rows=%d elapsed=%.1fs", name, policy, int(rows), elapsed, extra={"is_progress": True})
 
-    wb.save(out_path)
+    while True:
+        try:
+            wb.save(out_path)
+            break
+        except PermissionError as e:
+            print(f"[transform] 输出文件被占用，无法写入：{out_path}；请关闭占用的程序后继续。2秒后自动重试（Ctrl+C 取消）。错误：{e}", flush=True)
+            time.sleep(2)
     logger.info("done out=%s", out_path, extra={"is_progress": True})
 
 
