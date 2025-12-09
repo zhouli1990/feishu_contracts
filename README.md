@@ -3,9 +3,12 @@
 本项目提供“抓取 → 转换 → 模板填充”的完整流水线（`scripts/` + 包内模块）。抓取阶段可输出 JSONL/CSV/Excel；转换阶段按 `mapping.yaml` 规则将多 Sheet 数据映射到导入模板。
 
 ## 功能概览
-- 搜索接口：`POST /contract/v1/contracts/search`（分页，使用 `combine_condition.permission` 过滤可见范围）
+- **两种拉取方式**：
+  - **合同编码拉取**：通过搜索接口 `POST /contract/v1/contracts/search` 查询合同ID，再拉取详情
+  - **合同ID直接拉取**：已知合同ID时，直接调用详情接口，跳过搜索步骤（提升效率，降低频控风险）
 - 详情接口：`GET /contract/v1/contracts/{contract_id}`（并发抓取，含退避重试）
 - 导出：优先导出为 Excel（两个 Sheet：`search_items`、`details`），失败时回退为 CSV 两份文件
+- 数据合并：支持同时使用两种方式拉取，自动去重合并
 
 > 注：已移除根目录单脚本方式，请使用 `scripts/` 下脚本或包内 CLI。
 
@@ -53,7 +56,10 @@ python3 -m pip install requests
 
 ## 配置 `config/settings.yaml`
 - `feishu.app_key` / `feishu.app_secret`：飞书应用凭据（必填，用于“全流程”脚本）。
-- `fetch.*`：抓取参数，含分页大小、可见范围、并发线程、限制数量、合同编码清单文件等。
+- `fetch.*`：抓取参数，含分页大小、可见范围、并发线程、限制数量等。
+  - `contract_codes_file`：合同编码清单文件路径（通过搜索接口拉取）
+  - `contract_ids_file`：合同ID清单文件路径（直接拉取详情，跳过搜索）
+  - 支持同时配置两个文件，系统会自动合并去重
 - `convert.*`：JSONL → CSV/Excel 的默认路径。
 - `paths.*`：模板转换的默认路径；`output_dir` 用于默认输出导入模板位置。
 
@@ -61,6 +67,11 @@ python3 -m pip install requests
 ```bash
 python scripts/run_full_pipeline.py --config config/settings.yaml
 ```
+**说明**：
+- 会依次处理 `contract_codes_file` 和 `contract_ids_file` 两种数据源
+- 已拉取的合同ID会自动去重，避免重复请求
+- 两种方式的数据会合并到同一个输出文件
+
 输出包括：
 - JSONL：`convert.jsonl_input`
 - 详情 CSV：`convert.csv_output`

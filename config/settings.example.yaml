@@ -18,7 +18,8 @@ fetch:
   permission: 0        # 0=全部，1=我的可见，2=我申请的
   detail_workers: 1
   limit_contracts: 0
-  contract_codes_file: data/raw/合同编码清单.txt
+  contract_codes_file: data/raw/合同编码清单.txt  # 合同编码清单（通过搜索接口拉取）
+  contract_ids_file: data/raw/合同ID清单.txt      # 合同ID清单（直接拉取详情，跳过搜索）
 
 options:
   excel_engine: openpyxl

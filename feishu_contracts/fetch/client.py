@@ -33,6 +33,8 @@ class FetchConfig:
     limit_contracts: int = 0
     contract_codes_file: Optional[str] = None
     contract_codes: List[str] = None  # type: ignore[assignment]
+    contract_ids_file: Optional[str] = None  # 合同ID清单文件路径
+    contract_ids: List[str] = None  # type: ignore[assignment]  # 内联合同ID列表
     output_jsonl: str = "contracts.jsonl"
     status_csv: str = "contracts_status.csv"
     final_csv: str = "contracts_details.csv"
@@ -43,6 +45,8 @@ class FetchConfig:
     def __post_init__(self) -> None:
         if self.contract_codes is None:
             self.contract_codes = []
+        if self.contract_ids is None:
+            self.contract_ids = []
 
 
 class RateLimiter:
@@ -352,6 +356,35 @@ def _load_contract_codes(contract_codes_file: Optional[str], inline_codes: List[
     return deduped
 
 
+def _load_contract_ids(contract_ids_file: Optional[str], inline_ids: List[str]) -> List[str]:
+    """
+    从文件和内联参数加载合同ID列表
+    返回去重后的合同ID列表
+    """
+    ids: List[str] = []
+    if contract_ids_file:
+        try:
+            with open(contract_ids_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if s:
+                        ids.append(s)
+        except Exception:
+            pass
+    for cid in inline_ids or []:
+        s = str(cid).strip()
+        if s:
+            ids.append(s)
+    # 去重
+    seen = set()
+    deduped: List[str] = []
+    for cid in ids:
+        if cid not in seen:
+            seen.add(cid)
+            deduped.append(cid)
+    return deduped
+
+
 def _process_codes_once(
     codes: List[str],
     client: FeishuContractClient,
@@ -494,6 +527,94 @@ def _process_codes_once(
     return status_rows, sorted(failed_codes)
 
 
+def _fetch_details_by_ids(
+    contract_ids: List[str],
+    client: FeishuContractClient,
+    jsonl_path: str,
+    seen_ids: set,
+    attempt: int,
+    limit_contracts: int = 0,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """
+    直接根据合同ID列表拉取详情，不经过搜索接口
+    返回：(状态行列表, 失败的合同ID列表)
+    """
+    status_rows: List[Dict[str, Any]] = []
+    failed_ids: set = set()
+    count_written = 0
+    success_count = 0
+    fail_count = 0
+    start_t = time.time()
+    progress_interval = max(1, int(get_progress_interval(100)))
+    
+    for idx, cid in enumerate(contract_ids):
+        cid = str(cid).strip()
+        if not cid:
+            continue
+            
+        try:
+            logger.debug("fetch_detail_by_id start", extra={"contract_id": cid})
+        except Exception:
+            pass
+        
+        try:
+            detail_list = client.fetch_all_details([cid], workers=1)
+            detail = detail_list[0] if detail_list else {}
+            
+            if isinstance(detail, dict) and detail.get("_error"):
+                raise RuntimeError(str(detail.get("_error")))
+            
+            if isinstance(detail, dict) and cid not in seen_ids:
+                rec = dict(detail)
+                rec.setdefault("contract_id", cid)
+                # 注意：从合同ID直接拉取时，没有合同编码信息
+                # 可以从详情数据中提取 contract_number 字段作为合同编码
+                contract_code = detail.get("contract_number") or ""
+                rec.setdefault("contract_code", contract_code)
+                
+                _append_jsonl_line(jsonl_path, rec)
+                seen_ids.add(cid)
+                count_written += 1
+                success_count += 1
+            
+            status_rows.append({
+                "contract_code": detail.get("contract_number") or "",
+                "contract_id": cid,
+                "status": "success",
+                "error": "",
+                "attempt": attempt,
+            })
+            
+        except Exception as e:
+            status_rows.append({
+                "contract_code": "",
+                "contract_id": cid,
+                "status": "fail",
+                "error": str(e),
+                "attempt": attempt,
+            })
+            failed_ids.add(cid)
+            fail_count += 1
+        
+        # 进度日志
+        processed = idx + 1
+        if processed % progress_interval == 0 or processed == len(contract_ids):
+            elapsed = max(time.time() - start_t, 1e-6)
+            rps = processed / elapsed
+            remaining = max(len(contract_ids) - processed, 0)
+            eta_s = (remaining / rps) if rps > 0 else 0.0
+            logger.info(
+                "progress %d/%d ok=%d fail=%d rps=%.1f eta=%.0fs",
+                processed, len(contract_ids), success_count, fail_count, rps, eta_s,
+                extra={"is_progress": True, "contract_id": cid},
+            )
+        
+        if limit_contracts > 0 and count_written >= limit_contracts:
+            break
+    
+    return status_rows, sorted(failed_ids)
+
+
 def run_fetch(cfg: FetchConfig) -> Dict[str, Any]:
     # ensure parent dirs
     for p in [cfg.output_jsonl, cfg.status_csv, cfg.final_csv] + ([cfg.output_xlsx] if cfg.output_xlsx else []):
@@ -508,8 +629,12 @@ def run_fetch(cfg: FetchConfig) -> Dict[str, Any]:
     rate_limiter = RateLimiter(cfg.rate_limit_qps, 1.0)
     client = FeishuContractClient(access_token, rate_limiter=rate_limiter, token_manager=token_manager)
 
+    # 加载合同编码与合同ID
     codes = _load_contract_codes(cfg.contract_codes_file, cfg.contract_codes)
-    if not codes:
+    contract_ids = _load_contract_ids(cfg.contract_ids_file, cfg.contract_ids)
+    
+    if not codes and not contract_ids:
+        # 两种数据源都为空，直接返回
         return {
             "jsonl": cfg.output_jsonl,
             "status_csv": cfg.status_csv,
@@ -527,35 +652,73 @@ def run_fetch(cfg: FetchConfig) -> Dict[str, Any]:
             pass
 
     seen_ids: set = set()
-    current_codes: List[str] = list(codes)
-    max_retry_rounds = 3
-    total_passes = max_retry_rounds + 1
-    for i in range(total_passes):
-        attempt = i + 1
-        status_rows, failed_codes = _process_codes_once(
-            current_codes,
-            client,
-            cfg.page_size,
-            cfg.output_jsonl,
-            seen_ids,
-            attempt,
-            limit_contracts=max(0, int(cfg.limit_contracts or 0)),
-        )
-        try:
-            ok_cnt = sum(1 for r in status_rows if str(r.get("status")) == "success")
-            fail_cnt = sum(1 for r in status_rows if str(r.get("status")) != "success")
-            logger.info(
-                "round_summary pass=%d ok=%d fail=%d remain=%d",
-                attempt, ok_cnt, fail_cnt, len(failed_codes),
+    
+    # ===== 第一阶段：处理合同编码（原有逻辑） =====
+    if codes:
+        logger.info("开始处理合同编码，共 %d 条", len(codes))
+        current_codes: List[str] = list(codes)
+        max_retry_rounds = 3
+        total_passes = max_retry_rounds + 1
+        for i in range(total_passes):
+            attempt = i + 1
+            status_rows, failed_codes = _process_codes_once(
+                current_codes,
+                client,
+                cfg.page_size,
+                cfg.output_jsonl,
+                seen_ids,
+                attempt,
+                limit_contracts=max(0, int(cfg.limit_contracts or 0)),
             )
-        except Exception:
-            pass
-        _write_status_csv(cfg.status_csv, status_rows, append=(attempt > 1), encoding=cfg.encoding, text_columns=(cfg.text_columns or []))
-        if not failed_codes:
-            break
-        if attempt >= total_passes:
-            break
-        current_codes = failed_codes
+            try:
+                ok_cnt = sum(1 for r in status_rows if str(r.get("status")) == "success")
+                fail_cnt = sum(1 for r in status_rows if str(r.get("status")) != "success")
+                logger.info(
+                    "round_summary pass=%d ok=%d fail=%d remain=%d",
+                    attempt, ok_cnt, fail_cnt, len(failed_codes),
+                )
+            except Exception:
+                pass
+            _write_status_csv(cfg.status_csv, status_rows, append=(attempt > 1), encoding=cfg.encoding, text_columns=(cfg.text_columns or []))
+            if not failed_codes:
+                break
+            if attempt >= total_passes:
+                break
+            current_codes = failed_codes
+    
+    # ===== 第二阶段：处理合同ID（新增逻辑） =====
+    if contract_ids:
+        logger.info("开始处理合同ID，共 %d 条", len(contract_ids))
+        current_ids: List[str] = list(contract_ids)
+        max_retry_rounds = 3
+        total_passes = max_retry_rounds + 1
+        
+        for i in range(total_passes):
+            attempt = i + 1
+            status_rows, failed_ids = _fetch_details_by_ids(
+                current_ids,
+                client,
+                cfg.output_jsonl,
+                seen_ids,
+                attempt,
+                limit_contracts=max(0, int(cfg.limit_contracts or 0)) if not codes else 0,  # 如果已处理codes且达到限制，则跳过
+            )
+            try:
+                ok_cnt = sum(1 for r in status_rows if str(r.get("status")) == "success")
+                fail_cnt = sum(1 for r in status_rows if str(r.get("status")) != "success")
+                logger.info(
+                    "contract_ids_round_summary pass=%d ok=%d fail=%d remain=%d",
+                    attempt, ok_cnt, fail_cnt, len(failed_ids),
+                )
+            except Exception:
+                pass
+            _write_status_csv(cfg.status_csv, status_rows, append=True,  # 追加到状态文件
+                            encoding=cfg.encoding, text_columns=(cfg.text_columns or []))
+            if not failed_ids:
+                break
+            if attempt >= total_passes:
+                break
+            current_ids = failed_ids
 
     # convert jsonl → csv/excel
     convert_logger = logging.getLogger("convert")

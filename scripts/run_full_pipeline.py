@@ -46,6 +46,11 @@ def main() -> None:
     if not os.path.isabs(codes_file):
         codes_file = os.path.join(PROJ_ROOT, codes_file)
 
+    # 新增：加载合同ID清单文件路径
+    ids_file = fetch.get("contract_ids_file") or ""
+    if ids_file and not os.path.isabs(ids_file):
+        ids_file = os.path.join(PROJ_ROOT, ids_file)
+
     # ensure output directories
     for p in [jsonl_input, csv_output, excel_output, status_csv]:
         ensure_parent_dir(p)
@@ -60,6 +65,8 @@ def main() -> None:
         limit_contracts=int(fetch.get("limit_contracts", 0)),
         contract_codes_file=codes_file,
         contract_codes=[],
+        contract_ids_file=ids_file,  # 新增
+        contract_ids=[],  # 新增
         output_jsonl=jsonl_input,
         status_csv=status_csv,
         final_csv=csv_output,
