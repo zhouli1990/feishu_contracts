@@ -407,6 +407,7 @@ def get_values_from_source(df_map: Dict[str, pd.DataFrame], base_row: Dict[str, 
 def process_one_to_one(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame], wb, join_key: str, groups: Optional[Dict[str, Any]] = None) -> int:
     """通用的一对一目标表写入：以 details 为基表（如存在），否则以 ts_spec.source 为基表，
     按 join_key 维度聚合同一合同号下其他表的 where 命中行，并执行 transform 链得到单值输出。
+    支持 fallback_mode: first_non_empty 回退逻辑，按 from 顺序取第一个非空值。
     """
     ws = wb[ts_spec["name"]]
     hdr = header_index(ws)
@@ -422,12 +423,32 @@ def process_one_to_one(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame],
             to_col = mp["to"]["column"]
             fr = mp.get("from", [])
             where = mp.get("where")
+            where_list = mp.get("where_list")  # 支持多个 where 条件，与 from 一一对应
+            fallback_mode = mp.get("fallback_mode")  # 支持回退模式：first_non_empty
+            
             vals: List[Any] = []
             if not fr:
                 vals = []
+            elif fallback_mode == "first_non_empty":
+                # 回退模式：按顺序尝试 from 列表，取第一个非空值
+                for idx, f in enumerate(fr):
+                    # 确定当前源的 where 条件
+                    if where_list and idx < len(where_list):
+                        curr_where = where_list[idx]
+                    else:
+                        curr_where = where
+                    # 获取当前源的值
+                    curr_vals = get_values_from_source(df_map, base, f, curr_where, join_key, groups)
+                    # 检查是否为非空：过滤掉 None、空字符串、NaN
+                    non_empty = [v for v in curr_vals if v not in (None, "") and not (isinstance(v, float) and math.isnan(v))]
+                    if non_empty:
+                        vals = curr_vals  # 找到非空值，使用并停止回退
+                        break
             else:
+                # 默认模式：合并所有 from 源的值
                 for f in fr:
                     vals.extend(get_values_from_source(df_map, base, f, where, join_key, groups))
+            
             vals = apply_chain(vals, mp.get("transform", []))
             final = vals[0] if vals else mp.get("default", "")
             row_out[to_col] = final
@@ -446,6 +467,9 @@ def process_one_to_one(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame],
 
 
 def process_simple_append(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame], wb) -> int:
+    """简单追加模式（one_to_many）：逐行从源表追加到目标表。
+    支持 fallback_mode: first_non_empty 回退逻辑。
+    """
     ws = wb[ts_spec["name"]]
     hdr = header_index(ws)
     src_name = ts_spec.get("source")
@@ -462,12 +486,26 @@ def process_simple_append(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFram
             to_col = mp["to"]["column"]
             fr = mp.get("from", [])
             where = mp.get("where")
+            where_list = mp.get("where_list")  # 支持多个 where 条件
+            fallback_mode = mp.get("fallback_mode")  # 支持回退模式
+            
             vals: List[Any] = []
             if not fr:
                 vals = []
+            elif fallback_mode == "first_non_empty":
+                # 回退模式：按顺序尝试 from 列表，取第一个非空值
+                for idx, f in enumerate(fr):
+                    if f["sheet"] == ts_spec.get("source"):
+                        curr_val = base.get(f["column"], "")
+                        # 检查是否为非空
+                        if curr_val not in (None, "") and not (isinstance(curr_val, float) and math.isnan(curr_val)):
+                            vals = [curr_val]
+                            break
             else:
+                # 默认模式：合并所有 from 源的值
                 for f in fr:
                     vals.extend([base.get(f["column"], "")] if f["sheet"] == ts_spec.get("source") else [])
+            
             vals = apply_chain(vals, mp.get("transform", []))
             final = vals[0] if vals else (mp.get("default", ""))
             row_out[to_col] = final

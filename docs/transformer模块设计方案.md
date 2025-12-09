@@ -390,8 +390,9 @@ lookups:
 - **date_parse**：解析日期/时间。参数：`input_formats`（数组）、`tz`（默认 `Asia/Shanghai`）、`on_error`（默认 null）。
 - **date_format**：格式化为目标样式。参数：`pattern`，如 `"yyyy-MM-dd"`。
 - **first**：取第一个非空值（列表/标量均可）。参数：无。
-- **coalesce**：从多个来源中取第一个非空。参数：来源字段路径列表。
+- **coalesce**：(已弃用，使用 `fallback_mode: first_non_empty` 代替) 从多个来源中取第一个非空。
 - **default**：若为空则写入默认值。参数：`value`。
+- **fallback_mode**：配置级选项(非 transform 算子)，支持 `first_non_empty`，按 from 顺序取第一个非空值。
 
 > 说明：本项目当前阶段不强制使用 `boolean_map/dict_map` 归一化；示例中若出现，仅代表能力，落地时按“原样文本或解析后文本”输出为先。
 
@@ -436,7 +437,52 @@ lookups:
 - **冲突处理**：同一合同同名属性多条且配置使用 `first` 时，按源出现顺序取首条；使用 `join_agg` 时合并输出，默认保序去重。
 - **审计**：输出 `transform_audit.json` 记录每列处理的命中行数、解析/跳过/默认值次数等指标。
 
-#### 5.1.5 性能与大数据量建议
+#### 5.1.5 字段回退机制(fallback_mode) - v1.1 新增
+从 v1.1 开始，支持字段回退逻辑，用于处理优先字段为空的场景:
+
+- **配置语法**:
+```yaml
+- to: { column: 合同编码 }
+  from:
+    - { sheet: details, column: contract_number }  # 优先
+    - { sheet: details, column: contract_id }      # 回退
+  transform: [trim]
+  fallback_mode: first_non_empty
+```
+
+- **执行逻辑**:
+  1. 按顺序尝试 `from` 列表中的每个源
+  2. 获取当前源的值，过滤空值(`None`/`""`/`NaN`)
+  3. 若当前源有非空值，立即使用并停止回退
+  4. 若所有源均为空，则使用 `default` 或留空
+
+- **where_list 支持**:
+  - 当回退源需要不同 `where` 条件时，使用 `where_list` 与 `from` 一一对应:
+```yaml
+- to: { column: 需求人 }
+  from:
+    - { sheet: form, column: attribute_value }
+    - { sheet: form, column: attribute_value }
+  where_list:
+    - { attribute_name: "需求人" }
+    - { attribute_name: "L需求人" }  # 历史字段
+  transform:
+    - json_parse: {}
+    - form_pick: { field: name }
+  fallback_mode: first_non_empty
+```
+  - 若 `where_list` 未覆盖所有 `from` 项，剩余项使用 `where` 作为默认条件
+
+- **兼容性**:
+  - 不配置 `fallback_mode` 时，保持原有行为：合并所有 `from` 源的值
+  - 配置 `fallback_mode: first_non_empty` 时，按顺序取第一个非空值
+
+- **适用场景**:
+  - 同一表不同字段回退(contract_number → contract_id)
+  - form 长表属性回退("需求人" → "L需求人")
+  - 跨表回退(details → form → default)
+
+#### 5.1.6 性能与大数据量建议
 - 仅选择需要的列读取（`usecols`）。
 - 对 `form` 先基于 `attribute_name` 预过滤，再与 `details` 关联。
 - 对长列表字段的 JSON 解析采用向量化/批量处理，避免逐行 Python 循环；必要时分块处理。

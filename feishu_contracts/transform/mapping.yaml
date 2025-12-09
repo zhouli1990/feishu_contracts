@@ -19,12 +19,20 @@ target_sheets:
     source: details
     mappings:
       - to: { column: 合同编码 }
-        from: [{ sheet: details, column: contract_number }]
+        from: [
+          { sheet: details, column: contract_number },
+          { sheet: details, column: contract_id }
+        ]
         transform: [trim]
         required: true
+        fallback_mode: first_non_empty
       - to: { column: 合同流水号 }
-        from: [{ sheet: details, column: contract_number }]
+        from: [
+          { sheet: details, column: contract_number },
+          { sheet: details, column: contract_id }
+        ]
         transform: [trim]
+        fallback_mode: first_non_empty
       - to: { column: 合同状态 }
         from: [{ sheet: details, column: contract_status_code }]
         transform: 
@@ -108,6 +116,7 @@ target_sheets:
       - to: { column: 需求人 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "需求人" }
+        default: [{"value": "", "label": ""}]
         transform:
           - json_parse: {}
           - form_pick: { field_pairs: [name, user_id], unique: true }
@@ -118,9 +127,11 @@ target_sheets:
               keep_original: true
               default: ""
           - json_stringify: {}
+        
       - to: { column: 需求人部门 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "需求人部门" }
+        default: [{"value": "", "label": ""}]
         transform:
           - json_parse: {}
           - form_pick: { field_pairs: [name, lark_department_id], unique: true }
@@ -128,6 +139,7 @@ target_sheets:
               value_field: lark_department_id
               label_field: name
           - json_stringify: {}
+        
       - to: { column: 履约保证金 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "履约保证金" }
@@ -187,7 +199,7 @@ target_sheets:
         where: { attribute_name: "来源系统单号" }
         transform:
           - json_parse: {}
-          - form_pick: { field: name }
+          - form_pick: { field: content }
       - to: { column: 门店名称 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "门店名称" }
