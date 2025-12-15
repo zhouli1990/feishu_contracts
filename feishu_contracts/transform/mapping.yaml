@@ -1,38 +1,37 @@
 version: 1
 join:
   keys:
-    contract_number:
-      details: contract_number
-      form: contract_number
-      payments: contract_number
-      contract_budget_list: contract_number
-      our_party_list: contract_number
-      counter_party_list: contract_number
+    group_id:
+      details: group_id
+      form: group_id
+      payment_plan_list: group_id
+      contract_budget_list: group_id
+      our_party_list: group_id
+      counter_party_list: group_id
 
 # 目标模板各 Sheet 的映射
-# 注意：如需切换“需求人”提取 user_id，只需将 form_pick.field 改为 user_id
 
 target_sheets:
   - name: 历史合同导入
-    row_key: contract_number
+    row_key: group_id
     row_policy: one_to_one
     source: details
     mappings:
       - to: { column: 合同编码 }
-        from: [
-          { sheet: details, column: contract_number },
-          { sheet: details, column: contract_id }
-        ]
+        from: 
+          - { sheet: details, column: contract_number }
+          - { sheet: details, column: group_id }
         transform: [trim]
         required: true
         fallback_mode: first_non_empty
-      - to: { column: 合同流水号 }
-        from: [
-          { sheet: details, column: contract_number },
-          { sheet: details, column: contract_id }
-        ]
+      - to: { column: 飞书合同id }
+        from: 
+          - { sheet: details, column: contract_id }
         transform: [trim]
-        fallback_mode: first_non_empty
+        required: true
+      - to: { column: 合同流水号 }
+        from: [{ sheet: details, column: group_id }]
+        transform: [trim]
       - to: { column: 合同状态 }
         from: [{ sheet: details, column: contract_status_code }]
         transform: 
@@ -58,7 +57,8 @@ target_sheets:
         transform: [trim]
       - to: { column: 计价方式 }
         from: [{ sheet: details, column: property_type_name }]
-        transform: [trim]
+        transform: 
+          - dict: { table: 计价方式, default: "" }
       - to: { column: 合同性质 }
         default: "单次合同"
       - to: { column: 合同总额（含税） }
@@ -73,10 +73,12 @@ target_sheets:
           - round: 4
       - to: { column: 币种 }
         from: [{ sheet: details, column: currency_name }]
-        transform: [trim]
+        transform:
+          - { dict: { table: 币种, default: "" } }
       - to: { column: 合同期限类型 }
         from: [{ sheet: details, column: fixed_validity_name }]
-        transform: [trim]
+        transform: 
+          - dict: { table: 合同期限类型, default: "" }
       - to: { column: 合同期限说明 }
         from: [{ sheet: details, column: validity_date_desc }]
         transform: [trim]
@@ -91,10 +93,16 @@ target_sheets:
           - date_parse: { input_formats: ["yyyy-MM-dd", "yyyy/M/d", "yyyy/M/dd"], tz: "Asia/Shanghai" }
           - date_format: "yyyy-MM-dd"
       - to: { column: 创建时间 }
-        from: [{ sheet: details, column: create_time }]
+        from:
+          - { sheet: details, column: create_time }
+          # - { sheet: form, column: attribute_value }
+        # where_list:
+          # - {}  # 第一个源没有 where 条件，使用空对象占位
+          # - { attribute_name: "L创建时间" }
         transform:
           - date_parse: { input_formats: ["yyyy-MM-dd HH:mm:ss", "yyyy/M/d H:mm", "yyyy-MM-dd"], tz: "Asia/Shanghai" }
           - date_format: "yyyy-MM-dd HH:mm:ss"
+        # fallback_mode: first_non_empty
       - to: { column: 合同签订时间 }
         from: [{ sheet: details, column: signed_time }]
         transform:
@@ -105,17 +113,33 @@ target_sheets:
         transform:
           - date_parse: { input_formats: ["yyyy-MM-dd HH:mm:ss", "yyyy/M/d H:mm", "yyyy-MM-dd"], tz: "Asia/Shanghai" }
           - date_format: "yyyy-MM-dd HH:mm:ss"
-      - to: { column: 合同提报人 }
-        from: [{ sheet: details, column: create_employee_code }]
+      - to: { column: 合同创建人飞书user_id }
+        from: [{ sheet: details, column: create_user_id }]
         transform: [trim]
-      - to: { column: 合同提报部门 }
-        from: [{ sheet: details, column: department_id }]
+      - to: { column: 合同创建人姓名 }
+        from: [{ sheet: details, column: create_user_name }]
+        transform: [trim]
+      - to: { column: 终止日期类型 }
+        from: [{ sheet: details, column: termination_date_type_code }]
+        transform: 
+          - dict: { table: 终止日期类型编码, default: "" }
+      - to: { column: 终止日期 }
+        from: [{ sheet: details, column: termination_date }]
+        transform:
+          - date_parse: { input_formats: ["yyyy-MM-dd HH:mm:ss", "yyyy/M/d H:mm", "yyyy-MM-dd"], tz: "Asia/Shanghai" }
+          - date_format: "yyyy-MM-dd HH:mm:ss"
+      - to: { column: 终止原因 }
+        from: [{ sheet: details, column: termination_remark }]
         transform: [trim]
 
-      # form 长表字段：按 attribute_name 过滤，取 attribute_value
+      # form 长表字段：按 attribute_name 过滤，取 attribute_value（支持历史字段回退）
       - to: { column: 需求人 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "需求人" }
+        from:
+          - { sheet: form, column: attribute_value }
+          - { sheet: form, column: attribute_value }
+        where_list:
+          - { attribute_name: "需求人" }
+          - { attribute_name: "L需求人" }
         default: [{"value": "", "label": ""}]
         transform:
           - json_parse: {}
@@ -127,10 +151,15 @@ target_sheets:
               keep_original: true
               default: ""
           - json_stringify: {}
+        fallback_mode: first_non_empty
         
       - to: { column: 需求人部门 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "需求人部门" }
+        from:
+          - { sheet: form, column: attribute_value }
+          - { sheet: form, column: attribute_value }
+        where_list:
+          - { attribute_name: "需求人部门" }
+          - { attribute_name: "L需求人部门" }
         default: [{"value": "", "label": ""}]
         transform:
           - json_parse: {}
@@ -139,6 +168,7 @@ target_sheets:
               value_field: lark_department_id
               label_field: name
           - json_stringify: {}
+        fallback_mode: first_non_empty
         
       - to: { column: 履约保证金 }
         from: [{ sheet: form, column: attribute_value }]
@@ -153,29 +183,47 @@ target_sheets:
           - number_parse: { thousands: ",", decimal: "." }
           - round: 2
       - to: { column: 产品名称 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "项目" }
+        from:
+          - { sheet: form, column: attribute_value }
+          - { sheet: form, column: attribute_value }
+        where_list:
+          - { attribute_name: "项目" }
+          - { attribute_name: "L项目" }
         transform:
           - json_parse: {}
           - form_pick: { field: name }
+        fallback_mode: first_non_empty
+      
       - to: { column: 知识产权归属 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "知识产权归属" }
         transform:
           - json_parse: {}
           - form_pick: { field: name }
+      
       - to: { column: 是否对外披露我方信息 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "是否对外披露我方信息" }
+        from:
+          - { sheet: form, column: attribute_value }
+          - { sheet: form, column: attribute_value }
+        where_list:
+          - { attribute_name: "是否对外披露我方信息" }
+          - { attribute_name: "L是否对外披露我方信息" }
         transform:
           - json_parse: {}
           - form_pick: { field: name }
+        fallback_mode: first_non_empty
+      
       - to: { column: 是否有保函 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "是否有保函" }
+        from:
+          - { sheet: form, column: attribute_value }
+          - { sheet: form, column: attribute_value }
+        where_list:
+          - { attribute_name: "是否有保函" }
+          - { attribute_name: "L是否有保函" }
         transform:
           - json_parse: {}
           - form_pick: { field: name }
+        fallback_mode: first_non_empty
       - to: { column: 样件采购申请单号 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "样件采购申请单号" }
@@ -195,11 +243,16 @@ target_sheets:
           - json_parse: {}
           - form_pick: { field: name }
       - to: { column: 来源系统单号 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "来源系统单号" }
+        from:
+          - { sheet: details, column: source_id }
+          - { sheet: form, column: attribute_value }
+        where_list:
+          - {}  # 第一个源没有 where 条件，使用空对象占位
+          - { attribute_name: "来源系统单号" }
         transform:
           - json_parse: {}
           - form_pick: { field: content }
+        fallback_mode: first_non_empty
       - to: { column: 门店名称 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "门店名称" }
@@ -230,59 +283,9 @@ target_sheets:
         transform:
           - json_parse: {}
           - form_pick: { field: name }
-      # form 长表字段-历史合同
-      # - to: { column: 需求人 }
-      #   from: [{ sheet: form, column: attribute_value }]
-      #   where: { attribute_name: "L需求人" }
-      #   transform:
-      #     - json_parse: {}
-      #     - form_pick: { field_pairs: [name, user_id], unique: true }
-      #     - to_value_label:
-      #         value_field: user_id
-      #         label_field: name
-      #         value_dict: 员工映射
-      #         keep_original: true
-      #         default: ""
-      #     - json_stringify: {}
-      # - to: { column: 需求人部门 }
-      #   from: [{ sheet: form, column: attribute_value }]
-      #   where: { attribute_name: "L需求人部门" }
-      #   transform:
-      #     - json_parse: {}
-      #     - form_pick: { field_pairs: [name, lark_department_id], unique: true }
-      #     - to_value_label:
-      #         value_field: lark_department_id
-      #         label_field: name
-      #     - json_stringify: {}
-      # - to: { column: 产品名称 }
-      #   from: [{ sheet: form, column: attribute_value }]
-      #   where: { attribute_name: "L项目" }
-      #   transform:
-      #     - json_parse: {}
-      #     - form_pick: { field: name }
-      # - to: { column: 是否对外披露我方信息 }
-      #   from: [{ sheet: form, column: attribute_value }]
-      #   where: { attribute_name: "L是否对外披露我方信息" }
-      #   transform:
-      #     - json_parse: {}
-      #     - form_pick: { field: name }
-      # - to: { column: L对方主体 }
-      #   from: [{ sheet: form, column: attribute_value }]
-      #   where: { attribute_name: "L对方主体" }
-      #   transform: [trim]
-      # - to: { column: 是否有保函 }
-      #   from: [{ sheet: form, column: attribute_value }]
-      #   where: { attribute_name: "L是否有保函" }
-      #   transform:
-      #     - json_parse: {}
-      #     - form_pick: { field: name }
-      # - to: { column: 创建时间 }
-      #   from: [{ sheet: form, column: attribute_value }]
-      #   where: { attribute_name: "L创建时间" }
-      #   transform: 
-      #     - date_parse: { input_formats: ["yyyy-MM-dd", "yyyy/M/d", "yyyy-MM-dd HH:mm:ss"], tz: "Asia/Shanghai" }
-      #     - date_format: "yyyy-MM-dd"
-
+      - to: { column: L对方主体 }
+        from: [{ sheet: form, column: attribute_value }]
+        where: { attribute_name: "L对方主体" }
 
   - name: 付款计划
     row_key: uuid
@@ -290,7 +293,11 @@ target_sheets:
     source: payment_plan_list
     mappings:
       - to: { column: 合同编码 }
-        from: [{ sheet: payment_plan_list, column: contract_number }]
+        from:
+          - { sheet: payment_plan_list, column: contract_number }
+          - { sheet: payment_plan_list, column: group_id }
+        transform: [trim]
+        fallback_mode: first_non_empty
       - to: { column: uuid }
         from: [{ sheet: payment_plan_list, column: uuid }]
       - to: { column: 付款时间 }
@@ -331,7 +338,11 @@ target_sheets:
     source: contract_budget_list
     mappings:
       - to: { column: 合同编码 }
-        from: [{ sheet: contract_budget_list, column: contract_number }]
+        from:
+          - { sheet: contract_budget_list, column: contract_number }
+          - { sheet: contract_budget_list, column: group_id }
+        transform: [trim]
+        fallback_mode: first_non_empty
       - to: { column: uuid }
         from: [{ sheet: contract_budget_list, column: uuid }]
       - to: { column: 预算年度 }
@@ -404,22 +415,29 @@ target_sheets:
     source: form
     mappings:
       - to: { column: 合同编码 }
-        from: [{ sheet: form, column: contract_number }]
+        from: 
+          - { sheet: form, column: contract_number }
+          - { sheet: form, column: group_id }
+        transform: [trim]
+        fallback_mode: first_non_empty
+      - to: { column: 飞书合同id }
+        from: 
+          - { sheet: details, column: contract_id }
+        transform: [trim]
       - to: { column: 是否我方先盖章 }
-        from: [{ sheet: form, column: attribute_value }]
-        where: { attribute_name: "是否我方先盖章" }
+        from: 
+          - { sheet: form, column: attribute_value }
+          - { sheet: form, column: attribute_value }
+        where_list: 
+          - { attribute_name: "是否我方先盖章" }
+          - { attribute_name: "L是否我方先盖章" }
         transform:
           - json_parse: {}
           - form_pick: { field: name }
+          - dict: { table: 是否我方先盖章, default: "" }
+        fallback_mode: first_non_empty
       - to: { column: 签约方式 }
         default: "纸质签约"
-      # 历史合同字段
-      # - to: { column: 是否我方先盖章 }
-      #   from: [{ sheet: form, column: attribute_value }]
-      #   where: { attribute_name: "L是否我方先盖章" }
-      #   transform:
-      #     - json_parse: {}
-      #     - form_pick: { field: name }
 
   - name: 签约方
     row_key: contract_number
@@ -427,7 +445,11 @@ target_sheets:
     source: form
     mappings:
       - to: { column: 合同编码 }
-        from: [{ sheet: form, column: contract_number }]
+        from: 
+          - { sheet: form, column: contract_number }
+          - { sheet: form, column: group_id }
+        transform: [trim]
+        fallback_mode: first_non_empty
 
       - to: { column: 盖章种类 }
         default: "合同专用章"
@@ -444,7 +466,11 @@ target_sheets:
     source: our_party_list
     mappings:
       - to: { column: 合同编码 }
-        from: [{ sheet: our_party_list, column: contract_number }]
+        from: 
+          - { sheet: our_party_list, column: contract_number }
+          - { sheet: our_party_list, column: group_id }
+        transform: [trim]
+        fallback_mode: first_non_empty
       - to: { column: 交易方名称 }
         from: [{ sheet: our_party_list, column: our_party_name }]
         transform: [trim]
@@ -470,7 +496,11 @@ target_sheets:
     source: counter_party_list
     mappings:
       - to: { column: 合同编码 }
-        from: [{ sheet: counter_party_list, column: contract_number }]
+        from:
+          - { sheet: counter_party_list, column: contract_number }
+          - { sheet: counter_party_list, column: group_id }
+        transform: [trim]
+        fallback_mode: first_non_empty
       - to: { column: 交易方名称 }
         from: [{ sheet: counter_party_list, column: counter_party_name }]
         transform: [trim]
@@ -496,7 +526,11 @@ target_sheets:
     source:  relation_contracts_contracts
     mappings:
       - to: { column: 合同编码 }
-        from: [{ sheet: relation_contracts_contracts, column: contract_number }]
+        from: 
+          - { sheet: relation_contracts_contracts, column: contract_number }
+          - { sheet: relation_contracts_contracts, column: group_id }
+        transform: [trim]
+        fallback_mode: first_non_empty
       - to: { column: 关联合同编号 }
         from: [{ sheet: relation_contracts_contracts, column: related_contract_number }]
         transform: [trim]
@@ -506,11 +540,23 @@ target_sheets:
 
 dict:
   合同状态:
-    9: "已归档"
-    10: "已归档"
-    11: "已归档"
-    16: "已归档"
-    17: "已终止"
+    9: 已归档
+    10: 已归档
+    11: 已归档
+    16: 已归档
+    17: 已终止
+    0: 草稿
+    1: 已作废
+    2: 草稿
+    3: 草稿
+    4: 草稿
+    6: 草稿
+    8: 草稿
+    30: 草稿
+    31: 草稿
+
+  币种:
+    人民币元: 人民币
 
   税率字典 :
     0: ""
@@ -522,6 +568,12 @@ dict:
     1: "1%"
     3: "3%"
     5: "5%"
+  
+  计价方式:
+    无金额: ""
+
+  合同期限类型:
+    未选择: ""
 
   是否需要验收:
     True: "是"
@@ -531,6 +583,13 @@ dict:
     True: "是"
     False: "否"
 
+  是否我方先盖章:
+    是: "OPF"
+    否: "OSF"
+
+  终止日期类型编码:
+    1: "固定日期"
+    2: "签订即终止"
 # 表映射，会自动解析到dict字典里，形成GLOBLA缓存
 dict_sources:
   - name: 员工映射

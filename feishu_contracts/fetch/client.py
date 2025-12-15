@@ -278,7 +278,7 @@ class FeishuContractClient:
                         logger.debug("detail start try=%d", i + 1, extra={"contract_id": cid})
                     except Exception:
                         pass
-                    res = self.get_contract_detail(cid)
+                    res = self.get_contract_detail(cid, user_id_type="user_id")
                     try:
                         logger.debug("detail done", extra={"contract_id": cid})
                     except Exception:

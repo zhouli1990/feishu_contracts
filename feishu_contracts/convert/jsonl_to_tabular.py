@@ -134,12 +134,11 @@ def _sanitize_sheet_name(name: str, used: Dict[str, int]) -> str:
 def _build_list_tables(records: List[Dict[str, Any]], list_keys: List[str]) -> Dict[str, List[Dict[str, Any]]]:
     tables: Dict[str, List[Dict[str, Any]]] = {k: [] for k in list_keys}
     for rec in records:
-        contract_ref = (
-            rec.get("contract_number")
-            or rec.get("contract_code")
-            or rec.get("contract_id")
-            or ""
-        )
+        # 提取主记录的三个关联字段
+        contract_id = rec.get("contract_id", "")
+        group_id = rec.get("group_id", "")
+        contract_number = rec.get("contract_number", "")
+        
         for key in list_keys:
             value = rec.get(key)
             if value is None:
@@ -153,7 +152,12 @@ def _build_list_tables(records: List[Dict[str, Any]], list_keys: List[str]) -> D
                         pass
             items = value if isinstance(value, list) else [value]
             for item in items:
-                row: Dict[str, Any] = {"contract_number": contract_ref}
+                # 为所有子表添加三个关联字段
+                row: Dict[str, Any] = {
+                    "contract_id": contract_id,
+                    "group_id": group_id,
+                    "contract_number": contract_number
+                }
                 if isinstance(item, dict):
                     for subk, subv in item.items():
                         row[subk] = _to_json_cell_value(subv)
@@ -166,12 +170,11 @@ def _build_list_tables(records: List[Dict[str, Any]], list_keys: List[str]) -> D
 def _build_relation_contracts_contracts_table(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for rec in records:
-        contract_ref = (
-            rec.get("contract_number")
-            or rec.get("contract_code")
-            or rec.get("contract_id")
-            or ""
-        )
+        # 提取主记录的三个关联字段
+        contract_id = rec.get("contract_id", "")
+        group_id = rec.get("group_id", "")
+        contract_number = rec.get("contract_number", "")
+        
         relation_val = rec.get("relation")
         if relation_val is None:
             continue
@@ -210,7 +213,12 @@ def _build_relation_contracts_contracts_table(records: List[Dict[str, Any]]) -> 
                         pass
             items = contracts if isinstance(contracts, list) else [contracts]
             for item in items:
-                row: Dict[str, Any] = {"contract_number": contract_ref}
+                # 为关联合同表添加三个关联字段
+                row: Dict[str, Any] = {
+                    "contract_id": contract_id,
+                    "group_id": group_id,
+                    "contract_number": contract_number
+                }
                 row["relation_key"] = rc.get("relation_key", "")
                 row["relation_name"] = rc.get("relation_name", "")
                 row["contract_ids"] = _to_json_cell_value(rc.get("contract_ids"))

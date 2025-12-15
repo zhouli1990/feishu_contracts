@@ -23,6 +23,25 @@ def _to_str(x: Any) -> str:
     return str(x)
 
 
+def _is_empty_value(v: Any) -> bool:
+    """判断值是否为空（用于 fallback_mode 的空值检查）
+    
+    空值包括：
+    - None
+    - 空字符串 ""
+    - NaN
+    - 空列表 []
+    - 空字典 {}
+    """
+    if v is None or v == "":
+        return True
+    if isinstance(v, float) and math.isnan(v):
+        return True
+    if isinstance(v, (list, dict)) and len(v) == 0:
+        return True
+    return False
+
+
 def _java_dt_to_py(pattern: str) -> str:
     mapping = {"yyyy": "%Y", "MM": "%m", "dd": "%d", "HH": "%H", "mm": "%M", "ss": "%S"}
     out = pattern
@@ -439,15 +458,20 @@ def process_one_to_one(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFrame],
                         curr_where = where
                     # 获取当前源的值
                     curr_vals = get_values_from_source(df_map, base, f, curr_where, join_key, groups)
-                    # 检查是否为非空：过滤掉 None、空字符串、NaN
-                    non_empty = [v for v in curr_vals if v not in (None, "") and not (isinstance(v, float) and math.isnan(v))]
+                    # 检查是否为非空：过滤掉 None、空字符串、NaN、空列表、空字典
+                    non_empty = [v for v in curr_vals if not _is_empty_value(v)]
                     if non_empty:
                         vals = curr_vals  # 找到非空值，使用并停止回退
                         break
             else:
                 # 默认模式：合并所有 from 源的值
-                for f in fr:
-                    vals.extend(get_values_from_source(df_map, base, f, where, join_key, groups))
+                for idx, f in enumerate(fr):
+                    # 确定当前源的 where 条件
+                    if where_list and idx < len(where_list):
+                        curr_where = where_list[idx]
+                    else:
+                        curr_where = where
+                    vals.extend(get_values_from_source(df_map, base, f, curr_where, join_key, groups))
             
             vals = apply_chain(vals, mp.get("transform", []))
             final = vals[0] if vals else mp.get("default", "")
@@ -497,8 +521,8 @@ def process_simple_append(ts_spec: Dict[str, Any], df_map: Dict[str, pd.DataFram
                 for idx, f in enumerate(fr):
                     if f["sheet"] == ts_spec.get("source"):
                         curr_val = base.get(f["column"], "")
-                        # 检查是否为非空
-                        if curr_val not in (None, "") and not (isinstance(curr_val, float) and math.isnan(curr_val)):
+                        # 检查是否为非空（包括空列表、空字典）
+                        if not _is_empty_value(curr_val):
                             vals = [curr_val]
                             break
             else:
@@ -566,11 +590,20 @@ def run(source: str, template: str, mapping_path: str, out_path: str):
                 if s:
                     used_sheets.add(s)
                     if s == "form":
+                        # 收集 where 中的 attribute_name
                         w = mp.get("where", {})
                         if isinstance(w, dict):
                             attr = w.get("attribute_name")
                             if isinstance(attr, str) and attr:
                                 form_attr_names.add(attr)
+                        # 收集 where_list 中的 attribute_name
+                        w_list = mp.get("where_list", [])
+                        if isinstance(w_list, list):
+                            for w_item in w_list:
+                                if isinstance(w_item, dict):
+                                    attr = w_item.get("attribute_name")
+                                    if isinstance(attr, str) and attr:
+                                        form_attr_names.add(attr)
     if "form" in df_map and form_attr_names and "attribute_name" in df_map["form"].columns:
         df_map["form"] = df_map["form"][df_map["form"]["attribute_name"].isin(list(form_attr_names))]
     groups: Dict[str, Any] = {}
