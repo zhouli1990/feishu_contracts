@@ -140,7 +140,6 @@ target_sheets:
         where_list:
           - { attribute_name: "需求人" }
           - { attribute_name: "L需求人" }
-        default: [{"value": "", "label": ""}]
         transform:
           - json_parse: {}
           - form_pick: { field_pairs: [name, user_id], unique: true }
@@ -148,9 +147,9 @@ target_sheets:
               value_field: user_id
               label_field: name
               value_dict: 员工映射
-              keep_original: true
+              keep_original: ""
               default: ""
-          - json_stringify: {}
+          - json_stringify: { empty: [{"value": "", "label": ""}] }
         fallback_mode: first_non_empty
         
       - to: { column: 需求人部门 }
@@ -160,16 +159,18 @@ target_sheets:
         where_list:
           - { attribute_name: "需求人部门" }
           - { attribute_name: "L需求人部门" }
-        default: [{"value": "", "label": ""}]
         transform:
           - json_parse: {}
           - form_pick: { field_pairs: [name, lark_department_id], unique: true }
           - to_value_label:
               value_field: lark_department_id
               label_field: name
-          - json_stringify: {}
+              value_dict: 部门映射
+              keep_original: ""
+              default: ""
+          - json_stringify: { empty: [{"value": "", "label": ""}] }
         fallback_mode: first_non_empty
-        
+
       - to: { column: 履约保证金 }
         from: [{ sheet: form, column: attribute_value }]
         where: { attribute_name: "履约保证金" }
@@ -597,3 +598,9 @@ dict_sources:
     sheet: hpfm_employee
     key_column: attribute3
     value_column: employee_num
+
+  - name: 部门映射
+    path: ./dicts/LX-HR.xlsx
+    sheet: Result 1
+    key_column: feishu_id
+    value_column: department_id

@@ -314,6 +314,14 @@ def tf_to_value_label(values: List[Any], params: Dict[str, Any]) -> List[Any]:
 
 
 def tf_json_stringify(values: List[Any], _params: Dict[str, Any]) -> List[Any]:
+    empty = None
+    if isinstance(_params, dict):
+        empty = _params.get("empty")
+    if (values is None or len(values) == 0) and empty is not None:
+        try:
+            return [json.dumps(empty, ensure_ascii=False)]
+        except Exception:
+            return [str(empty)]
     try:
         return [json.dumps(values, ensure_ascii=False)]
     except Exception:
