@@ -75,6 +75,10 @@ target_sheets:
         from: [{ sheet: details, column: currency_name }]
         transform:
           - { dict: { table: 币种, default: "" } }
+      - to: { column: 预估金额币种 }
+        from: [{ sheet: details, column: currency_name }]
+        transform:
+          - { dict: { table: 币种, default: "" } }
       - to: { column: 合同期限类型 }
         from: [{ sheet: details, column: fixed_validity_name }]
         transform: 
@@ -147,9 +151,9 @@ target_sheets:
               value_field: user_id
               label_field: name
               value_dict: 员工映射
-              keep_original: ""
+              keep_original: false
               default: ""
-          - json_stringify: { empty: [{"value": "", "label": ""}] }
+          - json_stringify: { empty:  }
         fallback_mode: first_non_empty
         
       - to: { column: 需求人部门 }
@@ -166,9 +170,9 @@ target_sheets:
               value_field: lark_department_id
               label_field: name
               value_dict: 部门映射
-              keep_original: ""
+              keep_original: false
               default: ""
-          - json_stringify: { empty: [{"value": "", "label": ""}] }
+          - json_stringify: { empty:  }
         fallback_mode: first_non_empty
 
       - to: { column: 履约保证金 }
@@ -316,7 +320,8 @@ target_sheets:
           - round: 2
       - to: { column: 是否预付 }
         from: [{ sheet: payment_plan_list, column: prepaid }]
-        transform: [trim]
+        transform: 
+          - { dict: { table: 是否预付, default: "" } }
       - to: { column: 付款对象 }
         from: [{ sheet: payment_plan_list, column: payment_counter_party }]
         transform:
@@ -490,6 +495,30 @@ target_sheets:
         from: [{ sheet: our_party_list, column: certification_id }]
         transform: [trim]
   ## 对方
+  # - name: 合同关联相对方（通用）
+  #   append: true
+  #   row_key: group_id
+  #   row_policy: one_to_one
+  #   source: form
+  #   mappings:
+  #     - to: { column: 合同编码 }
+  #       from: 
+  #         - { sheet: form, column: contract_number }
+  #         - { sheet: form, column: group_id }
+  #       transform: [trim]
+  #       fallback_mode: first_non_empty
+  #     - to: { column: 交易方名称 }
+  #       from: [{ sheet: form, column: attribute_value }]
+  #       where: { attribute_name: "L对方主体" }
+  #       transform: 
+  #     - to: { column: 是否我方 }
+  #       default: "是"
+  #     - to: { column: 交易方角色 }
+  #       default: "对方"
+  #     - to: { column: 是否盖章或签字 }
+  #       default: "1"
+  #     - to: { column: 是否为主签约方 }
+  #       default: "是"
   - name: 合同关联相对方（通用）
     append: true
     row_key: counter_party_id
@@ -577,12 +606,12 @@ dict:
     未选择: ""
 
   是否需要验收:
-    True: "是"
-    False: "否"
+    "True": "是"
+    "False": "否"
 
   是否预付:
-    True: "是"
-    False: "否"
+    "True": "是"
+    "False": "否"
 
   是否我方先盖章:
     是: "OPF"
@@ -594,8 +623,8 @@ dict:
 # 表映射，会自动解析到dict字典里，形成GLOBLA缓存
 dict_sources:
   - name: 员工映射
-    path: ./dicts/hpfm_employee.xlsx
-    sheet: hpfm_employee
+    path: ./dicts/employee.xlsx
+    sheet: employee
     key_column: attribute3
     value_column: employee_num
 

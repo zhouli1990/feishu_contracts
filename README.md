@@ -297,6 +297,12 @@ dict:
   - json_stringify: {}
   ```
 
+  支持为空列表指定输出（避免空值输出为 `[]`）：
+  ```yaml
+  - json_stringify:
+      empty: [{"value": "", "label": ""}]
+  ```
+
 #### 数值处理
 - **number_parse**：解析数值字符串
   ```yaml
@@ -360,8 +366,12 @@ dict:
 #### 示例4：form 长表字段（JSON 解析 + 字段提取）
 ```yaml
 - to: { column: 需求人 }
-  from: [{ sheet: form, column: attribute_value }]
-  where: { attribute_name: "需求人" }
+  from:
+    - { sheet: form, column: attribute_value }
+    - { sheet: form, column: attribute_value }
+  where_list:
+    - { attribute_name: "需求人" }
+    - { attribute_name: "L需求人" }
   transform:
     - json_parse: {}
     - form_pick: { field_pairs: [name, user_id], unique: true }
@@ -371,7 +381,8 @@ dict:
         value_dict: 员工映射
         keep_original: true
         default: ""
-    - json_stringify: {}
+    - json_stringify: { empty: [{"value": "", "label": ""}] }
+  fallback_mode: first_non_empty
 ```
 
 #### 示例5：字段回退
@@ -415,6 +426,12 @@ dict_sources:
     sheet: hpfm_employee
     key_column: attribute3      # 源值列
     value_column: employee_num  # 目标值列
+
+  - name: 部门映射
+    path: ./dicts/LX-HR.xlsx
+    sheet: Result 1
+    key_column: feishu_id
+    value_column: department_id
 ```
 
 ### 空值处理规则
